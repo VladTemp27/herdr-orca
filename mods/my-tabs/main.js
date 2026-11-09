@@ -47,6 +47,16 @@ function closePane(id, cx, ask = false) {
   closeTab(p.tab, cx, ask);
 }
 
+// Collapsing hides the whole sidebar; this button lives in the tab bar so it stays visible.
+// Herdr's brand button shrinks it to a rail instead (on macOS it then hides itself), so a
+// rail is turned into a hide at the width it had (the brand button saves it in sidebar.width).
+function railToHidden(sidebar) {
+  if (!sidebar || sidebar.hidden || (sidebar.size?.px ?? Infinity) >= 160) return;
+  const width = shared("sidebar.width");
+  run("layout.resize", { id: "sidebar", px: width >= 160 ? width : 268 });
+  run("layout.hide", { id: "sidebar" });
+}
+
 export default class Tabs extends View {
   init(_props, cx) {
     this.pressed = null;
@@ -117,6 +127,7 @@ export default class Tabs extends View {
         .when(c.active, el => el.child(div().id(`close-${c.id}`).text_color(t.dim).on_mouse_down("left", stop).on_click((_e, cx) => { cx.stop_propagation(); closeTab(c.id, cx); }).child(svg("mods/pane/close.svg").size(12))));
     };
     const root = layout(), sidebar = find(root, "sidebar"), w = window();
+    railToHidden(sidebar);
     // Old saved rails and a dragged-narrow sidebar can be smaller than the window buttons.
     const lightsPadding = w?.platform === "macos" && w.titlebar === "none" && !w.fullscreen && root?.traffic_lights
       ? Math.max(10, (root.traffic_lights[0] + 64) / settings().zoom - (sidebar?.hidden ? 0 : sidebar?.size?.px ?? 0))
@@ -138,6 +149,8 @@ export default class Tabs extends View {
     return h_flex().size_full().min_w(0).px(10).pl(lightsPadding).gap(3).items_center().bg(t.chrome).border_b(1).border_color(t.border)
       .on_mouse_up("left", () => { this.pressed = null; })
       .on_scroll_wheel(e => { if (Math.abs(e.delta.y) >= 1) run(e.delta.y > 0 ? "tab.prev" : "tab.next"); })
+      .when(Boolean(sidebar), el => el.child(button("sidebar-toggle", svg("mods/workspace-chrome/sidebar.svg").size(15), () => run("layout.toggle", { id: "sidebar" }))
+        .tooltip(sidebar.hidden ? "Show sidebar" : "Hide sidebar")))
       .child(h_flex().id("tab-scroll").flex_1().min_w(0).h_full().items_center().gap(3).overflow_x_scrollbar().children(shown.map(item)))
       .child(button("tab-new", "+", () => openOverlay({ mod: "my-new-menu", kind: "popup", width: 250, height: 543 })))
       .when(enabled.includes("files"), el => el.child(panelButton("files", "Files", "mods/files/file.svg")))

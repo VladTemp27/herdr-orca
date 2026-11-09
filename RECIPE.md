@@ -32,7 +32,7 @@ at 12,16 over the sidebar. The root background is `canvas`; terminals have 14×1
     Agents switch off brings it back. A footer (`view: footer`): Settings, "3 agents · 2 need you"
     while agents show in spaces, the Agents panel toggle, Add machine.
   - A space put to sleep shows a moon and **Asleep** on its second line.
-- **Tab bar** (42px): `my-tabs` pills for the space's tabs; a **▶ Dev | ▾** run button
+- **Tab bar** (42px): the sidebar toggle (it hides the whole sidebar and stays in the tab bar, so it can always bring it back; a rail from Herdr's brand button becomes a hide), `my-tabs` pills for the space's tabs; a **▶ Dev | ▾** run button
   (`t3-actions`, 108px); the right-panel toggle (36px).
 - **Main**: the active tab's panes as cards (radius 10, gap 8, 1px `border`, `accent` when focused,
   framed even when alone) with a 30px `my-pane` header: program icon, agent name, folder, status,
