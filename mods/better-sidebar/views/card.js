@@ -76,14 +76,17 @@ export class Card {
   }
 
   port(t, port, mono) {
-    const url = `http://${port.address}`;
-    return h_flex().id(`card-port-${port.pid}-${port.port}`).h(SIZE.row).flex_none().px(8).gap(9).items_center()
-      .rounded(RADIUS.row).cursor_pointer().tooltip(`Open ${url} · PID ${port.pid}`).hover((s) => s.bg(t.hover))
-      .on_mouse_down("left", stop).on_click((_e, cx) => { cx.stop_propagation(); cx.open_url(url); })
+    // live-ports marks a port on another machine's localhost reachable: false; this computer can't open it.
+    const url = port.reachable === false ? null : `http://${port.address}`;
+    const where = port.machine ?? "local";
+    return h_flex().id(`card-port-${where}-${port.pid}-${port.port}`).h(SIZE.row).flex_none().px(8).gap(9).items_center()
+      .rounded(RADIUS.row).tooltip(url ? `Open ${url} · PID ${port.pid}` : `PID ${port.pid} on ${port.machine}`)
+      .when(Boolean(url), (el) => el.cursor_pointer().hover((s) => s.bg(t.hover))
+        .on_mouse_down("left", stop).on_click((_e, cx) => { cx.stop_propagation(); cx.open_url(url); }))
       .child(div().size(6).flex_none().rounded(3).bg(t.working))
       .child(div().w(44).flex_none().font_family(mono).text_size(TEXT.small).font_medium().text_color(t.foreground).child(String(port.port)))
       .child(div().flex_none().text_size(TEXT.small).text_color(t.muted).child(port.name))
-      .child(div().flex_1().min_w(0).truncate().text_size(TEXT.caption).text_color(t.dim).child(port.address));
+      .child(div().flex_1().min_w(0).truncate().text_size(TEXT.caption).text_color(t.dim).child(url || !port.machine ? port.address : `${port.address} on ${port.machine}`));
   }
 
   render() {

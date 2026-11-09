@@ -1,8 +1,8 @@
-// Live ports: a status-bar button (scans and publishes to shared "live-ports")
+// Live ports: a status-bar button (scans each machine with spaces and publishes to shared "live-ports")
 // and, with props.view "popup", the list it opens.
 import { View, div, svg } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { spaces, panes, theme, run, props, exec, shared, setShared, settings, window, openOverlay, closeOverlay, nextCommand } from "herdr";
+import { spaces, panes, machines, theme, run, props, exec, shared, setShared, settings, window, openOverlay, closeOverlay, nextCommand } from "herdr";
 import { scanPorts, portUrl, SHARED_KEY } from "./scan.js";
 
 const SCAN_MS = 4000;
@@ -37,7 +37,7 @@ export default class LivePorts extends View {
     this.busy = true;
     cx.spawn(async (cx) => {
       try {
-        const next = await scanPorts(spaces(), panes());
+        const next = await scanPorts(spaces(), panes(), machines(), window()?.platform, data());
         const text = JSON.stringify(next);
         // setShared redraws every mod, so only publish real changes.
         if (text !== JSON.stringify(data())) setShared(SHARED_KEY, next);
@@ -122,22 +122,26 @@ export default class LivePorts extends View {
       .text_color(t.muted).cursor_pointer().tooltip(tip).hover((s) => s.bg(t.hover).text_color(t.foreground))
       .on_click((_e, cx) => { cx.stop_propagation(); onClick(cx); })
       .child(icon(name, 13));
-    return h_flex().id(`port-${p.pid}-${p.port}`).h(SIZE.row).flex_none().px(14).pt(9).gap(14).items_start()
+    const where = p.machine ?? "local";
+    const url = portUrl(p);
+    return h_flex().id(`port-${where}-${p.pid}-${p.port}`).h(SIZE.row).flex_none().px(14).pt(9).gap(14).items_start()
       .border_b(1).border_color(t.border).hover((s) => s.bg(t.hover))
       .child(div().w(56).flex_none().font_family(mono()).font_bold().child(String(p.port)))
       .child(v_flex().flex_1().min_w(0).gap(2)
         .child(div().truncate().text_color(t.muted).child(p.name))
-        .child(div().truncate().text_size(12).text_color(t.dim).child(p.address)))
+        // A port another machine's localhost holds, which this computer can't open, says where it is.
+        .child(div().truncate().text_size(12).text_color(t.dim).child(url || !p.machine ? p.address : `${p.address} on ${p.machine}`)))
       .child(h_flex().gap(2).items_center()
-        .child(action(`open-${p.port}`, "external", "Open in browser", (cx) => cx.open_url(portUrl(p))))
-        .child(action(`stop-${p.pid}-${p.port}`, "stop", `Stop ${p.name} (PID ${p.pid})`, () => this.stop(p))));
+        .when(Boolean(url), (el) => el.child(action(`open-${where}-${p.port}`, "external", "Open in browser", (cx) => cx.open_url(url))))
+        .child(action(`stop-${where}-${p.pid}-${p.port}`, "stop", `Stop ${p.name} (PID ${p.pid})`, () => this.stop(p))));
   }
 
-  // Kill, then drop it from the shared list; the next scan confirms.
+  // Kill (on the machine it runs on), then drop it from the shared list; the next scan confirms.
   stop(p) {
-    exec("kill", [String(p.pid)]).catch(() => null);
+    const on = p.machine ?? null;
+    exec("kill", [String(p.pid)], { on }).catch(() => null);
     const d = data();
-    const drop = (l) => l.filter((x) => x.pid !== p.pid);
+    const drop = (l) => l.filter((x) => x.pid !== p.pid || (x.machine ?? null) !== on);
     const bySpace = Object.fromEntries(Object.entries(d.bySpace).map(([k, l]) => [k, drop(l)]).filter(([, l]) => l.length));
     setShared(SHARED_KEY, { bySpace, external: drop(d.external) });
   }

@@ -328,7 +328,7 @@ export default class NewWorktree extends View {
     }
     const agent = this.agents.find((a) => a.name === this.agent);
     const task = this.task(agent);
-    if (task) await this.prefill(task);
+    if (task) await this.prefill(task, cx);
     // The setup script (Worktree Hooks in project settings) runs in your login shell ($SHELL -lic),
     // so what your profile puts on PATH (pnpm, nvm, mise…) is there, with the HERDR_* variables.
     // Waiting: setup, then the agent, in one terminal. Not waiting: the agent starts; setup gets its own tab.
@@ -369,14 +369,17 @@ export default class NewWorktree extends View {
   }
 
   // The issues mod's helper pastes the task into Claude's prompt once it's ready, without sending it.
-  // It watches this Mac's terminals only, so a remote space gets the task on the clipboard.
-  async prefill(task) {
-    if (!this.on) {
+  // It watches this computer's terminals only and needs sh, so a remote space, or any space of a
+  // Windows app, gets the task on the clipboard (the app's own, so it works where pbcopy doesn't).
+  async prefill(task, cx) {
+    const platform = window()?.platform;
+    if (!this.on && platform !== "windows") {
       await exec("sh", ["-c", 'nohup sh "$0" "$@" >/dev/null 2>&1 &', `${appHome()}/mods/issues/prefill.sh`, task]).catch(() => null);
       return;
     }
-    await exec("sh", ["-c", 'printf %s "$1" | pbcopy', "copy", task]).catch(() => null);
-    notify({ title: "Task copied", body: "Paste it into the agent with ⌘V." });
+    cx.write_to_clipboard(task);
+    // Outside macOS terminal.paste is Ctrl+Shift+V; Ctrl+V on Linux goes to the program instead.
+    notify({ title: "Task copied", body: `Paste it into the agent with ${platform === "macos" ? "⌘V" : "Ctrl+Shift+V"}.` });
   }
 
   key(e, cx) {
