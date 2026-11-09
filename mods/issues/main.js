@@ -2,14 +2,15 @@ import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { spaces, panes, focused, exec, run, theme, openOverlay, closeOverlay, props, shared, setShared } from "herdr";
 import { spaceFor, startWorkspace } from "./start.js";
-import { Viewer, openUrl } from "./viewer.js";
+import { Viewer, openUrl, labelChip } from "./viewer.js";
 import { icons, icon, avatarPath, loadAvatar } from "./icons.js";
 import { readCache, writeCache, age, repoChanged } from "./cache.js";
+import { Projects, filterMenuView } from "./projects.js";
 
 // Orca-style issues and PRs table, opened as a popup (mod.json overlay).
 // Popups it opens (filters, repo, row menus) answer through shared "issues.pick".
 
-const DEFAULT = { issues: "is:issue is:open", prs: "is:pr is:open" };
+const DEFAULT = { issues: "is:issue is:open", prs: "is:pr is:open", projects: "" };
 const FIELDS = {
   issues: "number,title,author,state,stateReason,labels,assignees,updatedAt,url",
   prs: "number,title,author,state,isDraft,labels,assignees,updatedAt,url,headRefName",
@@ -60,7 +61,8 @@ const pick = (value) => setShared("issues.pick", { ...value, at: Date.now() });
 
 export default class Issues extends View {
   init(_props, cx) {
-    const { issue, overlay, copyMenu: copying, menu, repoMenu } = props() ?? {};
+    const { issue, overlay, copyMenu: copying, menu, repoMenu, filterMenu } = props() ?? {};
+    if (filterMenu) { this.filterMenu = { ...filterMenu, overlay }; return; }
     if (issue) { this.viewer = new Viewer(issue, overlay, cx); return; }
     if (copying) { this.copying = { ...copying, overlay }; return; }
     if (menu) { this.menu = { ...menu, overlay }; return; }
@@ -68,10 +70,11 @@ export default class Issues extends View {
 
     this.overlay = overlay;
     this.repos = sharedMap("folders", "repos"); this.logins = sharedMap("logins", "logins"); this.spaceRepos = sharedMap("spaces", "spaces");
-    this.tab = "issues"; this.query = { ...DEFAULT }; this.page = 0;
+    this.tab = shared("issues.tab") ?? "issues"; this.query = { ...DEFAULT }; this.page = 0;
+    this.projects = new Projects(this);
     this.results = {}; this.loading = null; this.error = null;
     this.pickAt = shared("issues.pick")?.at; this.changedAt = shared("issues.changed")?.at;
-    this.input = InputState.new({ placeholder: "Search", value: this.query.issues });
+    this.input = InputState.new({ placeholder: "Search", value: this.query[this.tab] });
     this.input.on("submit", (_e, cx) => this.apply(this.input.value(), cx));
     cx.spawn(async (cx) => { await icons(); this.icons = true; cx.notify(); });
     this.resolve(cx);
@@ -144,6 +147,7 @@ export default class Issues extends View {
   // force (Refresh, the person's own edits) always fetches.
   load(cx, force = false) {
     if (!this.repo) return;
+    if (this.tab === "projects") return this.projects.load(cx, force);
     const key = this.key(), held = this.results[key];
     if (!force && age(held) < FRESH) return;
     // A load older than 45s (exec gives up at 30s) never blocks a new one.
@@ -172,17 +176,19 @@ export default class Issues extends View {
 
   apply(q, cx) {
     this.query[this.tab] = q.trim() || DEFAULT[this.tab];
+    if (this.tab === "projects") setShared("issues.projectQuery", this.query.projects);
     this.input.set_value(this.query[this.tab]);
     this.page = 0; this.load(cx); cx.notify();
   }
 
   setTab(tab, cx) {
-    this.tab = tab; this.page = 0; this.input.set_value(this.query[tab]); this.load(cx); cx.notify();
+    this.tab = tab; this.page = 0; setShared("issues.tab", tab); this.input.set_value(this.query[tab]); this.load(cx); cx.notify();
   }
 
   // A popup's answer (shared "issues.pick").
   handle(p, cx) {
     if (p.query !== undefined) return this.apply(p.query, cx);
+    if (p.project || p.groupBy || p.toggleField || p.setField || p.fieldMenu || p.projectsRefresh || p.toggleFilter || p.clearFilter) return this.projects.handle(p, cx);
     if (p.follow) { setShared("issues.selected", null); this.page = 0; return this.resolve(cx); }
     if (p.repo) {
       setShared("issues.selected", { repo: p.repo, on: p.on ?? null });
@@ -212,22 +218,24 @@ export default class Issues extends View {
 
   // A local folder of the repo, for git worktree; null when none is known (a repo picked
   // from GitHub that isn't checked out here), rather than some other repo's folder.
-  folder() {
-    const hit = Object.entries(this.repos).find(([k, v]) => v === this.repo && (JSON.parse(k)[1] ?? null) === (this.repoOn ?? null));
+  folder(repo = this.repo) {
+    const hit = Object.entries(this.repos).find(([k, v]) => v === repo && (JSON.parse(k)[1] ?? null) === (this.repoOn ?? null));
     return hit ? JSON.parse(hit[0])[0] : null;
   }
 
   // Start: the Create worktree dialog with this issue or PR picked; Open when its space exists.
-  start(i, cx) {
-    if (!this.folder()) { this.error = `No checkout of ${this.repo} is known here. Open a terminal in one, then Start.`; return cx.notify(); }
-    const args = { repo: this.repo, machine: this.repoOn, folder: this.folder(), item: i, pr: this.tab === "prs", overlay: this.overlay };
+  // repo/pr: a Projects item can be from another repo than the picked one.
+  start(i, cx, { repo = this.repo, pr = this.tab === "prs" } = {}) {
+    const folder = this.folder(repo);
+    if (!folder) { (this.tab === "projects" ? this.projects : this).error = `No checkout of ${repo} is known here. Open a terminal in one, then Start.`; return cx.notify(); }
+    const args = { repo, machine: this.repoOn, folder, item: i, pr, overlay: this.overlay };
     cx.spawn(async () => startWorkspace(args));
   }
 
-  openIssue(i) {
+  openIssue(i, { repo = this.repo, pr = this.tab === "prs" } = {}) {
     openOverlay({ mod: "issues", kind: "dialog", width: 0.86, height: 0.9, props: { issue: {
-      repo: this.repo, number: i.number, on: this.repoOn, data: null, me: this.me,
-      pr: this.tab === "prs", folder: this.folder(), machine: this.repoOn } } });
+      repo, number: i.number, on: this.repoOn, data: null, me: this.me,
+      pr, folder: this.folder(repo), machine: this.repoOn } } });
   }
 
   // Under the control just pressed: Herdr's default spot (the pointer) isn't tracked over
@@ -238,8 +246,8 @@ export default class Issues extends View {
     return b ? { x: b.x, y: b.y + b.height + 4 } : p ? { x: p.x, y: p.y } : null;
   }
 
-  popup(menu, width = 240) {
-    const at = this.anchor();
+  // at: a spot kept from an earlier press, for a menu opened from another menu.
+  popup(menu, width = 240, at = this.anchor()) {
     openOverlay({ mod: "issues", kind: "popup", width, ...(at ? { at } : {}), height: Math.min(460, 14 + (menu.title ? 26 : 0) + menu.items.reduce((h, it) => h + (it.hint ? 46 : 34), 0)), props: { menu } });
   }
 
@@ -272,8 +280,9 @@ export default class Issues extends View {
         .child(login.slice(0, 1).toUpperCase());
   }
 
-  status(i, t) {
-    const pr = this.tab === "prs";
+  updated(iso) { return updated(iso); }
+
+  status(i, t, pr = this.tab === "prs") {
     const [label, color, glyph] = pr
       ? (i.state === "MERGED" ? ["Merged", GITHUB.done, "pull"] : i.state === "CLOSED" ? ["Closed", GITHUB.skipped, "pull"] : i.isDraft ? ["Draft", GITHUB.skipped, "pull"] : ["Open", GITHUB.open, "pull"])
       : (i.state === "OPEN" ? ["Open", GITHUB.open, "issue"] : i.stateReason === "NOT_PLANNED" ? ["Closed", GITHUB.skipped, "skipped"] : ["Closed", GITHUB.done, "done"]);
@@ -287,6 +296,7 @@ export default class Issues extends View {
     const t = theme();
     if (this.copying) return this.copyMenuView(t);
     if (this.menu) return this.menuView(t);
+    if (this.filterMenu) return filterMenuView(this, t);
     if (this.repoMenu) return this.repoMenuView(t);
     const p = shared("issues.pick");
     // Handled just after this render: cx.notify() throws during render, which left loads stuck.
@@ -298,7 +308,7 @@ export default class Issues extends View {
       .text_color(t.foreground).text_size(13).px(20).pt(14).pb(16).gap(12)
       .child(this.topBar(t))
       .child(this.tabsRow(t))
-      .child(this.repo ? this.card(t, cx) : this.empty(t));
+      .child(!this.repo ? this.empty(t) : this.tab === "projects" ? this.projects.card(t, cx) : this.card(t, cx));
   }
 
   topBar(t) {
@@ -316,6 +326,7 @@ export default class Issues extends View {
     return h_flex().gap(8).items_center()
       .child(this.chip("tab-issues", "Issues", this.tab === "issues", t, (cx) => this.setTab("issues", cx)))
       .child(this.chip("tab-prs", "PRs", this.tab === "prs", t, (cx) => this.setTab("prs", cx)))
+      .child(this.chip("tab-projects", "Projects", this.tab === "projects", t, (cx) => this.setTab("projects", cx)))
       .child(this.btn("repo-pick", t, [div().size(8).rounded(2).bg(t.muted), div().child(this.repo?.split("/")[1] ?? "Choose repository"), this.glyph("updown", 14, t.muted)],
         () => {
           const at = this.anchor();
@@ -323,7 +334,7 @@ export default class Issues extends View {
             props: { repoMenu: { current: this.repo, following: this.following, detected: this.detected ?? null, local: known } } });
         }))
       .when(Boolean(this.repo), (e) => e
-        .child(this.btn("repo-github", t, this.glyph("external", 16), () => openUrl(`https://github.com/${this.repo}/${this.tab === "prs" ? "pulls" : "issues"}`), { square: true })));
+        .child(this.btn("repo-github", t, this.glyph("external", 16), () => openUrl(`https://github.com/${this.repo}/${{ prs: "pulls", projects: "projects" }[this.tab] ?? "issues"}`), { square: true })));
   }
 
   empty(t) {
@@ -344,12 +355,7 @@ export default class Issues extends View {
         .child(this.chip("seg-mine", "Assigned to me", q === mine, t, (cx) => this.apply(mine, cx))))
       .child(h_flex().px(18).py(12).gap(8).items_center()
         .child(this.btn("filters", t, [this.glyph("filter", 16), div().child("Filters")], () => this.filters()))
-        .child(h_flex().id("search").flex_1().min_w(0).h(34).px(12).gap(10).items_center().rounded(8).border_1().border_color(t.border).bg(t.background)
-          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-          .child(this.glyph("search", 16, t.muted))
-          .child(div().flex_1().min_w(0).child(Input.new(this.input).h_full().text_size(13).text_color(t.foreground)))
-          .when(q !== base, (e) => e.child(div().id("search-clear").cursor_pointer().text_color(t.muted).hover((s) => s.text_color(t.foreground))
-            .on_click((_e, cx) => this.apply(base, cx)).child(this.glyph("close", 16)))))
+        .child(this.searchBox(t, q, base))
         .child(this.btn("new", t, this.glyph("plus", 16), () => openUrl(`https://github.com/${this.repo}/${this.tab === "prs" ? "compare" : "issues/new"}`), { square: true }))
         .child(this.btn("refresh", t, this.loading ? svg("mods/workspace-chrome/spinner.svg").size(16).text_color(t.working).spin(900) : this.glyph("refresh", 16),
           (cx) => this.load(cx, true), { square: true })))
@@ -360,6 +366,15 @@ export default class Issues extends View {
         .when(!shown.length, (e) => e.child(div().py(40).text_center().text_size(12).text_color(t.dim)
           .child(this.loading ? "Loading…" : this.tab === "prs" ? "No pull requests match" : "No issues match"))))
       .when(pages > 1, (e) => e.child(this.pager(pages, t)));
+  }
+
+  searchBox(t, q, base) {
+    return h_flex().id("search").flex_1().min_w(0).h(34).px(12).gap(10).items_center().rounded(8).border_1().border_color(t.border).bg(t.background)
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .child(this.glyph("search", 16, t.muted))
+      .child(div().flex_1().min_w(0).child(Input.new(this.input).h_full().text_size(13).text_color(t.foreground)))
+      .when(q !== base, (e) => e.child(div().id("search-clear").cursor_pointer().text_color(t.muted).hover((s) => s.text_color(t.foreground))
+        .on_click((_e, cx) => this.apply(base, cx)).child(this.glyph("close", 16))));
   }
 
   // One table row; null draws the column headings.
@@ -385,7 +400,7 @@ export default class Issues extends View {
         .child(h_flex().gap(10).items_center().text_size(12).text_color(t.muted).overflow_hidden()
           .child(div().flex_none().child(i.author?.login?.replace(/^app\//, "") ?? "ghost"))
           .child(div().flex_none().child(repoName))
-          .children((i.labels ?? []).slice(0, 4).map((l) => div().flex_none().h(20).px(8).flex().items_center().rounded(10).bg(t.raised).text_size(11).text_color(t.muted).child(l.name)))))
+          .children((i.labels ?? []).slice(0, 4).map((l) => labelChip(l, t)))))
       .child(cell(120, assignees.length || this.me
         ? h_flex().id(`assign-${n}`).h(30).px(5).gap(4).items_center().rounded(15).hover((st) => st.bg(t.raised)).on_mouse_down("left", stop)
           .on_click((_e, cx) => {
@@ -521,9 +536,9 @@ export default class Issues extends View {
 
   menuView(t) {
     const { title, items, overlay } = this.menu;
-    return v_flex().id("issues-menu").size_full().p(6).gap(1).bg(t.popover).text_color(t.foreground).text_size(13)
+    return v_flex().id("issues-menu").size_full().overflow_y_scrollbar().p(6).gap(1).bg(t.popover).text_color(t.foreground).text_size(13)
       .when(Boolean(title), (e) => e.child(div().px(8).pt(4).pb(4).text_size(11).font_semibold().text_color(t.dim).child(title)))
-      .children(items.map((it, k) => h_flex().id(`m-${k}`).min_h(32).px(8).gap(8).items_center().rounded(6)
+      .children(items.map((it, k) => it.heading ? div().px(8).pt(8).pb(3).text_size(11).font_semibold().text_color(t.dim).child(it.heading) : h_flex().id(`m-${k}`).min_h(32).px(8).gap(8).items_center().rounded(6)
         .when(Boolean(it.pick || it.copy || it.open), (e) => e.cursor_pointer().hover((s) => s.bg(t.hover)))
         .on_click((_e, cx) => {
           if (it.copy) cx.write_to_clipboard(it.copy);

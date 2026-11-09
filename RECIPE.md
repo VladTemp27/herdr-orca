@@ -111,7 +111,8 @@ Project settings, Excalidraw (cmd-shift-e), Open in VS Code (cmd-g) and context 
   yellow from 30%, red from 60%; memory yellow from 30% of RAM, red from 50%. Click: spaces by
   memory with CPU, memory and heaviest process, expanding to terminals (click one to go to it), a
   Herdr row, and Sleep / Wake per space.
-- **Issues** (from the sidebar nav): Issues/PRs tabs, repo picker, filters, assignee/status menus
+- **Issues** (from the sidebar nav): Issues/PRs/Projects tabs (Projects: the repo's GitHub
+  Projects as a board or table, Group by, a Filter panel for iterations and fields, field edits), repo picker, filters, assignee/status menus
   (anchored under the control), Start/Open per row. **Start** opens Create worktree with that issue
   or PR picked, or switches to its space if one is open.
 - **Viewer**: issues and PRs. PRs get Conversation / Checks / Files changed (expand a file for its
@@ -164,7 +165,7 @@ Project settings, Excalidraw (cmd-shift-e), Open in VS Code (cmd-g) and context 
   list from `agents()` and `terminals()` (`parent`), reusing the Agents panel's helpers), `my-tabs`, `my-pane`, `my-status`, `my-menu`
   (terminal and space menus; `terminal_menu: "my-menu"`), `my-new-menu`, `my-worktree` (remove
   confirm): modified clones of Herdr's mods.
-- `issues` (table, viewer, `pr.js`, `start.js`, `prefill.sh`), `new-worktree` (dialog, `git.js`,
+- `issues` (table, viewer, `projects.js`, `pr.js`, `start.js`, `prefill.sh`), `new-worktree` (dialog, `git.js`,
   `hooks.js`), `project-settings` (with the same `hooks.js`: keep the two copies identical),
   `files-open-with` (+ `file-icons` for Material icons), `t3-actions`, `sidebar-nav`,
   `automations`, `usage-limits` (`helpers/*.sh`), `live-ports`, `desktop-notifications`,

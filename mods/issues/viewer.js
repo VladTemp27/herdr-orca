@@ -116,6 +116,7 @@ export function copyMenu({ repo, number, title, url }, at) {
 
 // A label as GitHub tints it: its color faint behind, its color as text unless too dark to read.
 export function labelChip(l, t) {
+  if (!/^[0-9a-f]{6}$/i.test(l.color ?? "")) return div().h(20).px(7).flex_none().flex().items_center().rounded(10).bg(t.raised).text_size(12).text_color(t.muted).child(l.name);
   const [r, g, b] = [0, 2, 4].map((i) => parseInt(l.color.slice(i, i + 2), 16));
   const light = (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.35;
   return div().h(20).px(7).flex_none().flex().items_center().rounded(10).border_1().border_color(`#${l.color}66`).bg(`#${l.color}2e`)
