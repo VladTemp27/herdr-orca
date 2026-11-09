@@ -12,6 +12,11 @@ export const projectKey = (machine, main) => JSON.stringify([machine ?? null, ma
 const GROUPS = "better-sidebar.groups";
 const COLORS = { ansi6: "#22a99a", ansi3: "#e3814f", ansi4: "#5b8def", ansi5: "#8b7cf6", ansi2: "#3fae6a", ansi1: "#d9649a" };
 const ICONS = [["auto", "Automatic"], ["emoji", "Emoji"], ["letter", "Letter"]];
+// new-worktree's built-in prompts (keep in step with its DEFAULTS).
+const PROMPTS = {
+  issue_prompt: 'Work on GitHub issue #{number} in {repo}: "{title}". Read it first with: gh issue view {number} -R {repo} --comments',
+  pr_prompt: 'Pick up GitHub pull request #{number} in {repo}: "{title}". Read it first with: gh pr view {number} -R {repo} --comments',
+};
 const tilde = (p) => (p && p.startsWith(home()) ? `~${p.slice(home().length)}` : p ?? "");
 const expand = (p) => (p.startsWith("~/") ? home() + p.slice(1) : p);
 
@@ -36,6 +41,12 @@ export default class ProjectSettings extends View {
     this.f.setup = TextareaState.new({ placeholder: "pnpm i\nln -s $HERDR_ROOT_PATH/.env $HERDR_WORKTREE_PATH/.env" });
     this.f.setup.set_auto_grow(4, 12);
     this.f.setup.on("change", (_e, cx) => cx.notify());
+    // What new-worktree pastes into Claude for an issue or PR; the placeholder is its built-in wording.
+    for (const [k, text] of Object.entries(PROMPTS)) {
+      this.f[k] = TextareaState.new({ placeholder: text });
+      this.f[k].set_auto_grow(3, 10);
+      this.f[k].on("change", (_e, cx) => cx.notify());
+    }
     this.when = "run"; this.wait = false; this.yamlSetup = null;
     this.icon = "auto"; this.color = "ansi6"; this.agent = ""; this.saved = false;
     this.members = null; // the spaces of this project, found after it's read
@@ -84,6 +95,8 @@ export default class ProjectSettings extends View {
       ...(v("location") ? { location: expand(v("location")).replace(/\/+$/, "") } : {}),
       ...(v("issue_branch") ? { issue_branch: v("issue_branch") } : {}),
       ...(v("setup") ? { setup: v("setup") } : {}),
+      ...(v("issue_prompt") ? { issue_prompt: v("issue_prompt") } : {}),
+      ...(v("pr_prompt") ? { pr_prompt: v("pr_prompt") } : {}),
       ...(this.when !== "run" ? { setupWhen: this.when } : {}),
       ...(this.wait ? { setupWait: true } : {}),
       ...(this.agent ? { agent: this.agent } : {}),
@@ -188,6 +201,24 @@ export default class ProjectSettings extends View {
           .child(toggle(this.wait, () => { this.wait = !this.wait; }))));
   }
 
+  // The Claude prompts: full-width boxes, like the setup script, so a long prompt is readable.
+  prompts(t) {
+    const box = (k, title, about) => v_flex().gap(6)
+      .child(v_flex().gap(3).child(div().text_size(14).font_semibold().child(title))
+        .child(div().text_size(12.5).text_color(t.muted).child(about)))
+      .child(div().id(`ps-${k}`).p(10).rounded(8).border_1().border_color(t.input).bg(t.popover).cursor_text()
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .child(Textarea.new(this.f[k]).w_full().text_size(12.5).text_color(t.foreground)));
+    return v_flex().mt(8).p(14).gap(12).rounded(10).border_1().border_color(t.border).bg(t.background)
+      .child(box("issue_prompt", "Claude prompt for an issue", "Pasted into Claude (not sent) when a worktree starts from an issue."))
+      .child(box("pr_prompt", "Claude prompt for a pull request", "Pasted into Claude (not sent) when a worktree starts from a PR."))
+      .child(h_flex().gap(6).flex_wrap().items_center()
+        .child(div().text_size(11.5).text_color(t.dim).child("Filled in:"))
+        .children(["{number}", "{title}", "{repo}", "{branch}"].map((p) => div().px(8).py(3).rounded(6).border_1().border_color(t.border)
+          .bg(t.raised).text_size(11.5).font_family("JetBrains Mono").text_color(t.muted).child(p))))
+      .child(div().text_size(11.5).text_color(t.dim).child("Blank uses Create worktree's Mod setting, else the wording shown."));
+  }
+
   removal(t) {
     const members = this.members, busy = new Set(agents().filter((a) => a.status === "working" || a.status === "blocked").map((a) => a.space));
     const live = (members ?? []).filter((sp) => busy.has(sp.id));
@@ -238,6 +269,7 @@ export default class ProjectSettings extends View {
         .child(this.section(t, "NEW WORKTREES START WITH"))
         .child(this.row(t, "Default agent", "Started in each new worktree", this.pills(t, "ps-agent",
           [["", "Last used"], ...this.agents.map((a) => [a.name, a.name])], this.agent, (v) => { this.agent = v; })))
+        .child(this.prompts(t))
         .child(this.removal(t));
     return v_flex().id("project-settings").size_full().bg(t.popover).text_size(13).text_color(t.foreground)
       .child(h_flex().h(52).flex_none().px(20).items_center().border_b(1).border_color(t.border)

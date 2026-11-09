@@ -179,7 +179,7 @@ Project settings, Excalidraw (cmd-shift-e), Open in VS Code (cmd-g) and context 
   `hibernate.sleeping` (`{space: {at, count}}`), `hibernate.request` (`{nonce, action, space}`, how
   the menu and the meter ask), `hibernate.answer` (the resume dialog's reply), `pane-heads`, `issues.pick`,
   `issues.changed`, `projects.settings` (per `JSON.stringify([machine, main checkout])`: name, icon,
-  `base`, `location`, `issue_branch`, `agent`, `setup`, `setupWhen`, `setupWait`),
+  `base`, `location`, `issue_branch`, `issue_prompt`, `pr_prompt`, `agent`, `setup`, `setupWhen`, `setupWait`),
   `projects.location`, `files-open-with.tabs`,
   `better-changes.*`. Git config: `branch.<b>.herdr-issue` / `herdr-pr` = `owner/repo#N`.
 - Programs: `git`, `gh` (logged in), `curl` (avatars), `osascript`/`pbcopy`/`open` on macOS,
