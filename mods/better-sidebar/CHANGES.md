@@ -21,7 +21,8 @@ Modified files:
   header, "New space there") starts the space in its machine's home, not the focused folder.
   It shares its drawn space order, and `agent.next` / `agent.prev` follow that order.
   The list scrolls itself (wheel, a draggable thumb) so it can follow the active space's row.
-- `views/panel-toggle.js`: also takes `next-space` / `prev-space`, stepping through spaces in the list's order.
+- `views/panel-toggle.js`: also takes `next-space` / `prev-space`, stepping through spaces in the list's order,
+  and `next-agent` / `prev-agent`, stepping through agents as the list draws them (sub-agents under their parent).
 - `views/find-node.js`: `hasSpacesView`.
 - `views/ui.js`: exports `RADIUS`.
 - `views/footer.js`: adapted to this layout; "N agents · N need you" while agents show in spaces.

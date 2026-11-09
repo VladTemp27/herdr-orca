@@ -13,6 +13,8 @@
     "cmd-shift-b": "better-sidebar.toggle-panel",
     "cmd-alt-]": "better-sidebar.next-space",
     "cmd-alt-[": "better-sidebar.prev-space",
+    "cmd-]": "better-sidebar.next-agent",
+    "cmd-[": "better-sidebar.prev-agent",
     "cmd-w": "my-tabs.close-tab",
     "cmd-shift-w": "my-tabs.close-pane"
   }

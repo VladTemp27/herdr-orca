@@ -4,7 +4,7 @@ import { h_flex } from "gpui-base";
 import { theme, run, props, layout, nextCommand } from "herdr";
 import { findNode } from "./find-node.js";
 import { IconButton } from "./ui.js";
-import { stepSpace } from "./space-nav.js";
+import { stepSpace, stepAgent } from "./space-nav.js";
 
 export class PanelToggle {
   init(_props, cx) {
@@ -15,6 +15,8 @@ export class PanelToggle {
         if (c === "toggle-panel") this.toggle();
         else if (c === "next-space") stepSpace(1);
         else if (c === "prev-space") stepSpace(-1);
+        else if (c === "next-agent") stepAgent(1);
+        else if (c === "prev-agent") stepAgent(-1);
       }
     });
   }
