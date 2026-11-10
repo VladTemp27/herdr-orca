@@ -3,7 +3,11 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar } from "gpui-base";
-import { run, props, closeOverlay, theme, spaces, panes, exec, home } from "herdr";
+import { run, props, closeOverlay, theme, spaces, panes, exec, home, shared, setShared } from "herdr";
+
+// better-sidebar's worktree notes (views/notes.js), by the same key: removing a worktree can take its note.
+const NOTES = "worktree.notes";
+const noteKey = (s) => JSON.stringify([s.machine ?? null, s.folder ?? s.id]);
 
 // Where a space is now: its first terminal's live folder, else where it was made.
 function place(s, all = panes()) {
@@ -127,6 +131,7 @@ export default class Worktree extends View {
     this.repo = undefined; // undefined: looking, null: not in git
     this.dirty = false;
     this.unpushed = [];
+    this.keepNote = false;
     this.handle = cx.focus_handle();
     if (props()?.action === "remove") this.handle.focus();
     cx.spawn(async (cx) => {
@@ -161,6 +166,11 @@ export default class Worktree extends View {
 
   close() {
     closeOverlay(props().overlay);
+  }
+
+  note() {
+    const s = this.space();
+    return (s && shared(NOTES)?.[noteKey(s)]) || "";
   }
 
   go(cx) {
@@ -235,7 +245,12 @@ export default class Worktree extends View {
     run("space.close", { id: s.id, confirmed: true });
     const force = this.dirty || mods.length > 0;
     const r = await git(this.repo.main, ["worktree", "remove", ...(force ? ["--force"] : []), this.repo.top], this.on);
-    return r.ok ? "" : r.err || "git worktree remove failed.";
+    if (!r.ok) return r.err || "git worktree remove failed.";
+    if (this.note() && !this.keepNote) {
+      const { [noteKey(s)]: _gone, ...rest } = shared(NOTES) ?? {};
+      setShared(NOTES, rest);
+    }
+    return "";
   }
 
   key(e, cx) {
@@ -319,7 +334,7 @@ export default class Worktree extends View {
 
   // The remove confirm: what goes, what stays, what would be lost, and real buttons.
   renderRemove(t) {
-    const s = this.space(), r = this.repo;
+    const s = this.space(), r = this.repo, note = this.note();
     const shared = r?.linked ? this.sharers() : [];
     const lose = !shared.length && (this.dirty || this.unpushed.length > 0);
     const ready = Boolean(r && r.linked) && !this.busy;
@@ -352,7 +367,14 @@ export default class Worktree extends View {
             .child(v_flex().rounded(10).border_1().border_color(t.border).bg(t.background)
               .child(line("mods/workspace-chrome/folder.svg", "Folder", r.top.split("/").pop(), shared.length ? pill("Kept", t.done) : pill("Deleted", t.blocked), tilde(r.top.slice(0, r.top.lastIndexOf("/") + 1), this.userHome)))
               .child(div().h(1).bg(t.border))
-              .child(line("mods/workspace-chrome/git-branch.svg", "Branch", this.branch || "detached", pill("Kept", t.done))))
+              .child(line("mods/workspace-chrome/git-branch.svg", "Branch", this.branch || "detached", pill("Kept", t.done)))
+              // Its note goes with it unless kept: the tag switches.
+              .when(Boolean(note) && !shared.length, (el) => el
+                .child(div().h(1).bg(t.border))
+                .child(line("mods/workspace-chrome/file-text.svg", "Note", note.split("\n")[0],
+                  div().id("wt-note-keep").cursor_pointer().tooltip(this.keepNote ? "Click to delete it" : "Click to keep it")
+                    .on_click((_e, cx) => { this.keepNote = !this.keepNote; cx.notify(); })
+                    .child(this.keepNote ? pill("Kept", t.done) : pill("Deleted", t.blocked))))))
             .when(shared.length > 0, (el) => el.child(div().text_size(12.5).text_color(t.muted)
               .child(`${shared.map((x) => x.name).join(", ")} also ${shared.length === 1 ? "uses" : "use"} this worktree, so it stays. Only this space closes.`)))
             .when(!shared.length && this.dirty, (el) => el.child(warn("Uncommitted changes in this worktree will be lost.")))

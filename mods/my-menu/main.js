@@ -126,7 +126,7 @@ export default class Menu extends View {
     closeOverlay(props()?.overlay);
     // Remove uses my-worktree's restyled confirm.
     if (it[1] === "project-settings") openOverlay({ mod: "project-settings", kind: "dialog", width: 660, height: 700, props: it[2] });
-    else if (it[1] === "worktree" && it[2].action === "remove") openOverlay({ mod: "my-worktree", kind: "dialog", width: 460, height: 300, props: it[2] });
+    else if (it[1] === "worktree" && it[2].action === "remove") openOverlay({ mod: "my-worktree", kind: "dialog", width: 460, height: 350, props: it[2] });
     // New and open use the Create worktree dialog (new-worktree); open starts on its Branch tab.
     else if (it[1] === "worktree") openOverlay({ mod: "new-worktree", kind: "dialog", width: 560, height: 780, props: { space: it[2].space, ...(it[2].action === "open" ? { mode: "branch" } : {}) } });
     else if (it[1] === "move-folder") {

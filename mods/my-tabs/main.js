@@ -35,7 +35,7 @@ function closeTab(id, cx, ask = false) {
   if (!s || s.tabs.length > 1) return run("tab.close", { id: tab });
   cx.spawn(async () => {
     const linked = await isWorktree(s).catch(() => false);
-    if (linked) openOverlay({ mod: "my-worktree", kind: "dialog", width: 460, height: 300, props: { space: s.id, action: "remove" } });
+    if (linked) openOverlay({ mod: "my-worktree", kind: "dialog", width: 460, height: 350, props: { space: s.id, action: "remove" } });
     else run("tab.close", { id: tab });
   });
 }
