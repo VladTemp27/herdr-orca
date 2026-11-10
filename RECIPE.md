@@ -85,8 +85,13 @@ Project settings, Excalidraw (cmd-shift-e), Open in VS Code (cmd-g) and context 
   thumb) because Herdr can't move a native scroll area from code. Hovering a
   repo row shows **⌄/›** (fold its worktrees, remembered; stays visible while folded), **⋯** (the
   menu) and **+** (Create worktree for that repo). Hovering any row ~450ms opens the **hover card**:
-  Pull request, Issue and Live ports sections; a row opens the viewer, icons copy the link or open
+  Note, Pull request, Issue and Live ports sections; a row opens the viewer, icons copy the link or open
   GitHub, a port opens in the browser; it closes 250ms after the pointer leaves row and card.
+- **Notes** (like Orca's worktree comments): the space menu's **Note…** opens one free-text note for
+  that checkout (⌘↩ saves; saving it empty removes it). A row with a note shows a note icon beside its
+  branch (the text on hover, a click edits it), and the hover card shows it first. Notes go by
+  machine and folder in shared `worktree.notes`, so one stays with its worktree when its space is
+  closed and reopened.
   Every **+** for a new space (the Spaces header, a machine's header, "New space there", and
   "New space" in the menu) starts it in that machine's home folder.
 - **Close & remove worktree** (space menu, or closing a worktree space's last tab): when another
@@ -164,7 +169,7 @@ Project settings, Excalidraw (cmd-shift-e), Open in VS Code (cmd-g) and context 
 `better-changes` (the `changes` slot, `"place": "none"`) and `better-config`.
 
 - `better-sidebar` (munza's Better Sidebar, modified; views by `props.view`: spaces, `agents`,
-  `footer`, `panel-toggle`, `card`, `groups`; `views/space-agents.js` draws agents in the spaces
+  `footer`, `panel-toggle`, `card`, `groups`, `note`; `views/space-agents.js` draws agents in the spaces
   list from `agents()` and `terminals()` (`parent`), reusing the Agents panel's helpers), `my-tabs`, `my-pane`, `my-status`, `my-menu`
   (terminal and space menus; `terminal_menu: "my-menu"`), `my-new-menu`, `my-worktree` (remove
   confirm): modified clones of Herdr's mods.

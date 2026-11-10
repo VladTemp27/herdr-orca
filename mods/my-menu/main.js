@@ -67,6 +67,8 @@ function items(p, git) {
         ...(git ? [["New worktree", "worktree", { space: tg.id, action: "new" }], ["Open worktree", "worktree", { space: tg.id, action: "open" }]] : []),
         // hibernate mod: stop this Mac's space's programs, or start them again.
         // better-sidebar's folders: a repo files with its worktrees, any other space by itself.
+        // better-sidebar's worktree notes: one note per checkout, edited in its dialog.
+        ["Note…", "note", { space: tg.id }],
         ["Move to folder…", "move-folder", { space: tg.id }],
         ...(tg.id && !tg.id.includes("/") ? [shared("hibernate.sleeping")?.[tg.id] ? ["Wake space", "hibernate", { action: "wake", space: tg.id }] : ["Sleep space", "hibernate", { action: "sleep", space: tg.id }]] : []),
         // A worktree space closes by removing its worktree (the dialog checks for unsaved work first).
@@ -90,7 +92,7 @@ const closes = (it) => it[0].startsWith("Close");
 function menuIcon(it) {
   const command = it[1];
   if (command === "hibernate") return `mods/hibernate/${it[2].action === "wake" ? "sun" : "moon"}.svg`;
-  const name = closes(it) ? "x" : command.endsWith(".rename") ? "square-pen" : command.endsWith(".new") ? "plus" : command === "worktree" ? "git-branch" : command === "move-folder" ? "folder" : command === "app.help" ? "terminal" : command === "app.theme" || command === "project-settings" ? "settings" : command === "pane.split" ? "panel-right" : command === "pane.zoom" ? "square" : "terminal";
+  const name = closes(it) ? "x" : command.endsWith(".rename") ? "square-pen" : command.endsWith(".new") ? "plus" : command === "worktree" ? "git-branch" : command === "move-folder" ? "folder" : command === "note" ? "file-text" : command === "app.help" ? "terminal" : command === "app.theme" || command === "project-settings" ? "settings" : command === "pane.split" ? "panel-right" : command === "pane.zoom" ? "square" : "terminal";
   return `mods/workspace-chrome/${name}.svg`;
 }
 
@@ -134,6 +136,7 @@ export default class Menu extends View {
       openOverlay({ mod: "better-sidebar", kind: "popup", width: 260, height: Math.min(460, 112 + (count + 1) * 31),
         props: { view: "groups", mode: "move", key, name: s?.name, machine: s?.machine ?? null } });
     }
+    else if (it[1] === "note") openOverlay({ mod: "better-sidebar", kind: "dialog", width: 460, height: 290, props: { view: "note", space: it[2].space } });
     else if (it[1] === "hibernate") setShared("hibernate.request", { nonce: Date.now(), ...it[2] });
     else run(it[1], it[2]);
   }

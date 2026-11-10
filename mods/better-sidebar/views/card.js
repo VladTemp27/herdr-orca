@@ -1,11 +1,12 @@
 // The hover card beside a worktree row: its PR, its issue and its live ports,
-// drawn like Herdr's menus. Opened by spaces.js as a window overlay with props
+// and its note, drawn like Herdr's menus. Opened by spaces.js as a window overlay with props
 // { view: "card", space, folder, machine, prs, issue }.
 import { div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { props, theme, shared, setShared, closeOverlay, openOverlay, exec, settings, notify } from "herdr";
+import { props, theme, shared, setShared, closeOverlay, openOverlay, exec, settings, notify, spaces } from "herdr";
 import { prAppearance } from "../git/pr-status.js";
 import { TEXT, SIZE, RADIUS, Icon } from "./ui.js";
+import { noteOf, openNote } from "./notes.js";
 
 export const HOVER_KEY = "better-sidebar.hover";
 // A hovered row's fresh PR and issue (spaces.js refreshHovered): { space, prs?, issue?, loading }.
@@ -75,6 +76,14 @@ export class Card {
         .child(this.button(`${id}-open`, "external", "Open on GitHub", t, (cx) => cx.open_url(url))));
   }
 
+  // The note's lines; a click edits it.
+  note(t, space, text) {
+    return v_flex().id("card-note").px(8).py(5).gap(1).rounded(RADIUS.row).cursor_pointer().tooltip("Edit note")
+      .text_size(TEXT.small).text_color(t.foreground).hover((s) => s.bg(t.hover)).on_mouse_down("left", stop)
+      .on_click((_e, cx) => { cx.stop_propagation(); closeOverlay(props().overlay); openNote(space); })
+      .children(text.split("\n").map((line) => div().child(line || " ")));
+  }
+
   port(t, port, mono) {
     // live-ports marks a port on another machine's localhost reachable: false; this computer can't open it.
     const url = port.reachable === false ? null : `http://${port.address}`;
@@ -99,6 +108,8 @@ export class Card {
     const ports = shared("live-ports")?.bySpace?.[p.space] ?? [];
     const mono = settings().font_family ?? "JetBrains Mono";
     const sections = [];
+    const space = spaces().find((s) => s.id === p.space), note = noteOf(space);
+    if (note) sections.push([this.label(t, "Note"), this.note(t, space, note)]);
     if (prs.length) sections.push([this.label(t, prs.length > 1 ? `Pull requests · ${prs.length}` : "Pull request"),
       ...prs.map((pr) => {
         const look = prAppearance(pr, t);

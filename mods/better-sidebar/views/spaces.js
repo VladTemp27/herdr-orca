@@ -29,6 +29,7 @@ import { loadSettings, duration } from "../settings.js";
 import { findNode } from "./find-node.js";
 import { TEXT, Icon, IconButton, Badge } from "./ui.js";
 import { HOVER_KEY, LIVE_KEY } from "./card.js";
+import { noteOf, openNote } from "./notes.js";
 import { SpaceAgents, inlineAgents, setInlineAgents } from "./space-agents.js";
 import { ORDER_KEY } from "./space-nav.js";
 import { readGroups, groupTint, isFolded, setFold, toggleFold, fileUnder, newGroupWith, openNameDialog, openProjectPicker, openGroupMenu } from "./groups.js";
@@ -466,7 +467,7 @@ export class Spaces {
       mod: "my-menu",
       kind: "popup",
       width: 200,
-      height: 260,
+      height: 300,
       props: { tab: "space", target: { id: w.id } },
     });
   }
@@ -1054,7 +1055,7 @@ export class Spaces {
   hasDetail(w, g) {
     const status = this.checkoutStatus(w);
     const moved = w.active && (g?.ahead > 0 || g?.behind > 0);
-    return Boolean(this.shownBranch(g) || moved || status?.prs.length || status?.issue || status?.error || this.ports(w).length || this.foldedSummary(w, g) || this.sleeping(w));
+    return Boolean(this.shownBranch(g) || moved || status?.prs.length || status?.issue || status?.error || this.ports(w).length || this.foldedSummary(w, g) || this.sleeping(w) || noteOf(w));
   }
 
   // Set by the hibernate mod while a space is asleep: { at, count }.
@@ -1088,6 +1089,22 @@ export class Spaces {
       .child(div().flex_1())
       .when(w.active && g?.ahead > 0, (el) => el.child(Badge(`\u2191${g.ahead}`)))
       .when(w.active && g?.behind > 0, (el) => el.child(Badge(`\u2193${g.behind}`)))
+      // Its note (views/notes.js): the text on hover, a click edits it.
+      .when(Boolean(noteOf(w)), (el) =>
+        el.child(
+          div()
+            .id(`space-note-${w.id}`)
+            .flex_none()
+            .text_color(t.muted)
+            .cursor_pointer()
+            .hover((s) => s.text_color(t.foreground))
+            .tooltip(noteOf(w))
+            .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+            .on_mouse_up("left", (_e, cx) => cx.stop_propagation())
+            .on_click(() => openNote(w))
+            .child(Icon("note", 13)),
+        ),
+      )
       .when(ports.length > 0, (el) =>
         el.child(
           div()
@@ -1280,7 +1297,7 @@ export class Spaces {
     const prs = status?.prs ?? [], issue = status?.issue ?? null;
     const ports = shared("live-ports")?.bySpace?.[w.id] ?? [];
     const b = this.rowBounds[w.id];
-    if ((!prs.length && !issue && !ports.length) || !b) return;
+    if ((!prs.length && !issue && !ports.length && !noteOf(w)) || !b) return;
     if (this.card?.space === w.id) return;
     this.closeCard();
     const h = shared(HOVER_KEY) ?? {};
