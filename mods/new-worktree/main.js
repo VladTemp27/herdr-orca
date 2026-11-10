@@ -292,7 +292,7 @@ export default class NewWorktree extends View {
   async create(plan, cx) {
     const r = this.project, on = this.on, pick = this.pick, branch = this.branch.value().trim();
     const g = async (args) => {
-      const res = await git(r.main, args, on);
+      const res = await git(r.main, args, on, 600_000);
       if (!res.ok) throw Error(res.err || `git ${args[0]} failed.`);
       return res;
     };
@@ -547,6 +547,8 @@ export default class NewWorktree extends View {
         .child(h_flex().id("nw-create").h(34).px(14).gap(8).items_center().rounded(8).text_size(13).font_medium()
           .bg(ready ? t.solid : t.raised).text_color(ready ? t.solid_foreground : t.dim)
           .when(ready, (el) => el.cursor_pointer().hover((s) => s.opacity(0.88)).on_click((_e, cx) => this.go(cx)))
+          // A big checkout can take minutes: as Herdr's worktree mod, it spins while working.
+          .when(this.busy, (el) => el.child(div().frames(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"], 90)))
           .child(this.busy ? "Working…" : plan?.action === "open" ? "Open worktree" : "Create worktree")
           .child(div().text_size(11).opacity(0.7).child(mac ? "⌘↵" : "Ctrl↵"))));
   }

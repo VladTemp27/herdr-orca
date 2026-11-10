@@ -23,6 +23,7 @@ const tilde = (path, userHome) => {
   const [p, h] = [path, userHome].map((s) => s.replace(/\\/g, "/"));
   return p.startsWith(h) ? `~${p.slice(h.length)}` : path;
 };
+const SPIN = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 const slug = (branch) => branch.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
 const ago = (s) => {
   const d = Date.now() / 1000 - s;
@@ -57,8 +58,10 @@ function spaceOf(path, all, on, spaceList, paneList) {
   })());
 }
 
-async function git(cwd, args, on) {
-  const r = await exec("git", args, { cwd, on });
+// From Herdr's worktree 0.1.14: exec stops a command after 30s unless told otherwise, so
+// worktree add and remove (a big checkout, a node_modules) get up to 10 minutes.
+async function git(cwd, args, on, timeout) {
+  const r = await exec("git", args, { cwd, on, ...(timeout === undefined ? {} : { timeout }) });
   return { ok: r.code === 0, out: (r.stdout ?? "").trim(), err: (r.stderr ?? r.stdout ?? "").trim() };
 }
 
@@ -196,7 +199,7 @@ export default class Worktree extends View {
     const path = `${ROOT(this.userHome)}/${this.repo.name}/${slug(branch)}`;
     const exists = (await git(this.repo.main, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], this.on)).ok;
     const add = exists ? ["worktree", "add", path, branch] : ["worktree", "add", "-b", branch, path, "HEAD"];
-    const r = await git(this.repo.top, add, this.on);
+    const r = await git(this.repo.top, add, this.on, 600_000);
     if (!r.ok) return r.err || "git worktree add failed.";
     const p = props();
     // Leave spaces unnamed so they follow the checkout folder and nest under the repo.
@@ -244,7 +247,7 @@ export default class Worktree extends View {
     // Terminals first: a shell sitting in the folder keeps it busy on Windows.
     run("space.close", { id: s.id, confirmed: true });
     const force = this.dirty || mods.length > 0;
-    const r = await git(this.repo.main, ["worktree", "remove", ...(force ? ["--force"] : []), this.repo.top], this.on);
+    const r = await git(this.repo.main, ["worktree", "remove", ...(force ? ["--force"] : []), this.repo.top], this.on, 600_000);
     if (!r.ok) return r.err || "git worktree remove failed.";
     if (this.note() && !this.keepNote) {
       const { [noteKey(s)]: _gone, ...rest } = shared(NOTES) ?? {};
@@ -356,6 +359,7 @@ export default class Worktree extends View {
       .bg(danger ? t.blocked : t.raised).border_color(danger ? t.blocked : t.border).text_color(danger ? "#ffffff" : t.foreground)
       .when(!enabled, (el) => el.opacity(0.5))
       .when(enabled, (el) => el.cursor_pointer().hover((st) => st.opacity(0.88)).on_click((_e, cx) => onClick(cx)))
+      .when(danger && this.busy, (el) => el.child(div().frames(SPIN, 90)))
       .child(label).child(div().text_size(11).opacity(0.7).child(hint));
     const body = r === undefined
       ? div().text_size(12.5).text_color(t.muted).child("Checking for unsaved work…")
@@ -455,6 +459,8 @@ export default class Worktree extends View {
           .justify_end()
           .text_size(11)
           .text_color(t.dim)
+          .gap(6)
+          .when(this.busy, (el) => el.child(div().frames(SPIN, 90)))
           .child(this.busy ? "working…" : blocked ? "esc close" : remove ? "↵ remove · esc cancel" : "↵ create · esc cancel"),
       );
   }

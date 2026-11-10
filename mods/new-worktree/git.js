@@ -8,8 +8,9 @@ export const slug = (branch) => branch.replace(/[^A-Za-z0-9._-]+/g, "-").replace
 export const titleSlug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/, "");
 export const tilde = (path, home) => (home && path.startsWith(home) ? `~${path.slice(home.length)}` : path);
 
-export async function git(cwd, args, on) {
-  const r = await exec("git", args, { cwd, on }).catch((e) => ({ code: 1, stderr: String(e) }));
+// exec stops a command after 30s unless told otherwise: worktree add and fetch on a big repo pass up to 10 minutes.
+export async function git(cwd, args, on, timeout) {
+  const r = await exec("git", args, { cwd, on, ...(timeout === undefined ? {} : { timeout }) }).catch((e) => ({ code: 1, stderr: String(e) }));
   return { ok: r.code === 0, out: (r.stdout ?? "").trim(), err: (r.stderr || r.stdout || "").trim() };
 }
 
