@@ -206,6 +206,12 @@ Project settings, Excalidraw (cmd-shift-e), Open in VS Code (cmd-g) and context 
   hasn't built yet.
 - GitHub only links "Closes #N" when the PR targets the default branch; badges also read the body
   and the branch name.
+- Desktop notifications on Windows: `toast.ps1` (WinRT toasts, silent, tag = terminal). Windows
+  drops toasts from an app id it doesn't know, and Herdr's Start entry is only an exe path, so it
+  registers `Herdr.DesktopNotifications` per user (DisplayName, IconUri). A click opens
+  `herdr-agent:<terminal>`, a per-user URL handler running `click.js` under `wscript` (no console
+  window): it accepts only an address (any page can open such a link), runs `herdr-app do
+  agent.focus` and `AppActivate("Herdr")`. Text reaches `toast.ps1` URI-encoded, never as script.
 - Agents in spaces and the Agents panel are separate mod copies with their own `localStorage`
   (folds, time in state); the switch keeps one of them showing (`layout.hide` / `layout.show`
   on the `agents` block), and the layout ships with that block `"hidden": true`.

@@ -1,13 +1,15 @@
 // desktop-notifications: Herdr's "needs you" and "finished" alerts in the
-// system's notification center too (macOS, Linux). Draws nothing: dock it in a
+// system's notification center too (macOS, Linux, Windows). Draws nothing: dock it in a
 // 0px block. alerts.js decides what to announce; this file delivers it.
 
 import { View, div } from "gpui-kit";
-import { agents, terminals, focused, window, exec, props, home } from "herdr";
+import { agents, terminals, focused, window, exec, props, home, appHome } from "herdr";
 import { diff } from "./alerts.js";
 
 const BUNDLE = "dev.herdr.app";
 const GROUP = "herdr-agent-";
+// Windows: the app id toast.ps1 registers under HKCU\Software\Classes\AppUserModelId.
+const AUMID = "Herdr.DesktopNotifications";
 // A copy of terminal-notifier.app carrying Herdr's icon (macOS takes the icon from the sender's bundle).
 const HERDR_NOTIFIER = "Applications/Herdr Notifier.app/Contents/MacOS/terminal-notifier";
 
@@ -20,7 +22,7 @@ const sh = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 export default class DesktopNotifications extends View {
   init(_props, cx) {
     this.known = null;
-    this.sender = null; // "terminal-notifier" | "osascript" | "notify-send" | "none", found on first use
+    this.sender = null; // "terminal-notifier" | "osascript" | "notify-send" | "toast" | "none", found on first use
     this.app = null; // herdr-app's path, for click-to-focus
     this.bin = "terminal-notifier"; // or the Herdr-icon copy, when installed
     // render runs on every live change; the timer covers a hidden block.
@@ -51,6 +53,14 @@ export default class DesktopNotifications extends View {
     if (this.sender === "terminal-notifier") {
       for (const address of clear) await notifier(this.bin, ["-remove", GROUP + address]).catch(() => {});
     }
+    if (this.sender === "toast") for (const address of clear) await this.toast("clear", { tag: address }).catch(() => {});
+  }
+
+  // Windows: everything goes to toast.ps1 as one URI-encoded argument, never as script
+  // (titles come from the programs in the terminals).
+  toast(action, data) {
+    const script = `${appHome()}/mods/desktop-notifications/toast.ps1`;
+    return exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, action, encodeURIComponent(JSON.stringify({ aumid: AUMID, ...data }))]);
   }
 
   async findSender() {
@@ -65,6 +75,8 @@ export default class DesktopNotifications extends View {
       this.app = found?.code === 0 ? found.stdout.trim() : null;
     } else if (platform === "linux") {
       this.sender = (await has("notify-send")) ? "notify-send" : "none";
+    } else if (platform === "windows") {
+      this.sender = "toast";
     } else {
       this.sender = "none";
     }
@@ -72,6 +84,11 @@ export default class DesktopNotifications extends View {
   }
 
   async post(sender, n) {
+    if (sender === "toast") {
+      const icon = `${appHome()}/frame/welcome/herdr.png`.replace(/\//g, "\\");
+      await this.toast("post", { tag: n.address, title: n.title, subtitle: n.subtitle, body: n.body, icon });
+      return;
+    }
     if (sender === "terminal-notifier") {
       const args = ["-title", n.title, "-message", n.body, "-group", GROUP + n.address, "-activate", BUNDLE];
       if (n.subtitle) args.push("-subtitle", n.subtitle);
