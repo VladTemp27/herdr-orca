@@ -16,6 +16,8 @@ function location() {
 }
 const key = () => JSON.stringify(location());
 const PER_FOLDER = 500, TOTAL = 5000;
+// Only local Windows paths share case and slash spelling; remote Unix paths stay exact.
+const pathKey = (p, on) => (!on && window()?.platform === "windows" ? p.replace(/\\/g, "/").toLowerCase() : p);
 
 // Material icons: icons.js is a copy of file-icons' table; the SVGs stay in that mod.
 const ICON_DIR = "mods/file-icons/icons";
@@ -112,9 +114,9 @@ export default class Panel {
           if (status?.code === 0) for (const entry of status.stdout.split("\0").filter(Boolean)) {
             const xy = entry.slice(0, 2), file = `${top.stdout.trim()}/${entry.slice(3)}`;
             // "!!": ignored; a wholly ignored folder comes as one "dir/" entry.
-            if (xy === "!!") { ignored.add(file.replace(/\/$/, "")); continue; }
+            if (xy === "!!") { ignored.add(pathKey(file.replace(/\/$/, ""), on)); continue; }
             if (count++ >= TOTAL) continue;
-            marks[file] = xy === "??" || xy.includes("A") ? "A" : xy.includes("U") ? "U" : xy.includes("D") ? "D" : "M";
+            marks[pathKey(file, on)] = xy === "??" || xy.includes("A") ? "A" : xy.includes("U") ? "U" : xy.includes("D") ? "D" : "M";
           }
         }
         if (!this.current(context)) return;
@@ -184,7 +186,7 @@ export default class Panel {
 
   // Ignored by git, itself or through a folder above it.
   isIgnored(path) {
-    for (let p = path; p; p = p.slice(0, Math.max(0, p.lastIndexOf("/")))) if (this.ignored.has(`${this.root}/${p}`)) return true;
+    for (let p = path; p; p = p.slice(0, Math.max(0, p.lastIndexOf("/")))) if (this.ignored.has(pathKey(`${this.root}/${p}`, this.on))) return true;
     return false;
   }
 
@@ -192,7 +194,7 @@ export default class Panel {
     if (out.length >= TOTAL || depth > 40) return out;
     for (const entry of this.entries.get(prefix) ?? []) {
       if (out.length >= TOTAL) break;
-      const path = prefix ? `${prefix}/${entry.name}` : entry.name, open = this.folders.has(path), mark = this.marks[`${this.root}/${path}`];
+      const path = prefix ? `${prefix}/${entry.name}` : entry.name, open = this.folders.has(path), mark = this.marks[pathKey(`${this.root}/${path}`, this.on)];
       out.push(h_flex().id(`file-${path}`).h(28).flex_none().pl(8 + depth * 18).pr(8).gap(7).items_center().rounded(7).cursor_pointer().hover(s => s.bg(t.hover))
         .when(this.isIgnored(path), el => el.opacity(0.5))
         .on_click((_e, cx) => entry.dir ? this.toggle(path, cx) : this.openTab(path, cx))

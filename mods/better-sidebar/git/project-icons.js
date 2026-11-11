@@ -2,6 +2,7 @@
 // owner's avatar, else a logo in the repo. Shares paddock's cache in data/paddock-icons.
 import { exec, appHome, shared, window } from "herdr";
 import { writeFile, unlink } from "fs/promises";
+import { shProgram, unix } from "./sh.js";
 
 const DATA_DIR = "data/paddock-icons";
 const TYPES = ["png", "jpg", "jpeg", "gif", "webp", "svg"];
@@ -36,13 +37,21 @@ export function pickedIcon(machine, root) {
   return project ? ((shared("paddock.icons") ?? {})[`${m}:${project.id}`] ?? null) : null;
 }
 
-// image() draws no JPEG in this build, so those become PNGs.
+// A PowerShell string literal (it also takes curly quotes as quotes).
+const psq = (s) => `'${String(s).replace(/['‘’‚‛]/g, "$&$&")}'`;
+
+// image() draws no JPEG in this build, so those become PNGs. Windows: System.Drawing,
+// never `convert` (that name is System32's FAT-to-NTFS disk converter there).
 async function place(src, dest, type) {
+  const platform = window().platform;
   const r = !isJpeg(type)
-    ? await exec("cp", ["--", src, dest])
-    : window().platform === "macos"
+    ? await unix("cp", ["--", src, dest])
+    : platform === "macos"
       ? await exec("sips", ["-s", "format", "png", src, "--out", dest])
-      : await exec("convert", [src, `png:${dest}`]).catch(() => ({ code: 1, stderr: "needs ImageMagick" }));
+      : platform === "windows"
+        ? await exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
+            `Add-Type -AssemblyName System.Drawing; $i = [Drawing.Image]::FromFile(${psq(src)}); try { $i.Save(${psq(dest)}, [Drawing.Imaging.ImageFormat]::Png) } finally { $i.Dispose() }`])
+        : await exec("convert", [src, `png:${dest}`]).catch(() => ({ code: 1, stderr: "needs ImageMagick" }));
   return r.code === 0 ? null : (r.stderr || r.stdout || "failed").trim();
 }
 
@@ -52,10 +61,11 @@ async function githubAvatar(root, machine) {
   if (!owner) return null;
   const dir = `${appHome()}/${DATA_DIR}/github`;
   const name = safe(owner);
-  const fresh = await exec("find", [dir, "-maxdepth", "1", "-name", `${name}.*`, "-mtime", "-1"]).catch(() => null);
+  // The pattern stays inside the script: Git's sh on Windows would glob a `*` argument.
+  const fresh = await exec(await shProgram(), ["-c", 'find "$1" -maxdepth 1 -name "$2.*" -mtime -1', "sh", dir, name]).catch(() => null);
   const have = fresh?.stdout.trim().split("\n").find((f) => iconType(f));
   if (have) return `${DATA_DIR}/github/${have.split("/").pop()}`;
-  await exec("mkdir", ["-p", dir]);
+  await unix("mkdir", ["-p", dir]);
   const tmp = `${dir}/${name}.download`;
   const d = await exec("curl", [
     "-fsSL", "--max-time", "10", "-o", tmp, "-w", "%{content_type}",
@@ -63,12 +73,12 @@ async function githubAvatar(root, machine) {
   ]);
   const type = TYPE_OF[d.stdout.trim().split(";")[0].toLowerCase()];
   if (d.code !== 0 || !type) {
-    await exec("rm", ["-f", "--", tmp]);
+    await unix("rm", ["-f", "--", tmp]);
     throw new Error("avatar download failed");
   }
-  await exec("sh", ["-c", 'for t in png jpg gif webp svg; do rm -f -- "$1.$t"; done', "sh", `${dir}/${name}`]);
+  await exec(await shProgram(), ["-c", 'for t in png jpg gif webp svg; do rm -f -- "$1.$t"; done', "sh", `${dir}/${name}`]);
   const failed = await place(tmp, `${dir}/${name}.${savedType(type)}`, type);
-  await exec("rm", ["-f", "--", tmp]);
+  await unix("rm", ["-f", "--", tmp]);
   if (failed) throw new Error(failed);
   return `${DATA_DIR}/github/${name}.${savedType(type)}`;
 }
@@ -89,14 +99,14 @@ f=$(git ls-files 2>/dev/null | grep -v node_modules | grep -iE '(^|/)(logo|icon|
 [ -n "$f" ] && [ -f "$f" ] && pick "$f"; true`;
 
 async function repoFileIcon(root, machine) {
-  const r = await exec("sh", ["-c", FIND, "sh", root], machine ? { on: machine } : {});
+  const r = await exec(await shProgram(machine), ["-c", FIND, "sh", root], machine ? { on: machine } : {});
   const [file, sum] = r.stdout.trim().split("\n");
   if (r.code !== 0 || !file || !sum || !iconType(file)) return null;
   const type = iconType(file);
   const rel = `${DATA_DIR}/repo/${safe(machine ?? "local")}-${hashText(root)}-${sum}.${savedType(type)}`;
   const dest = `${appHome()}/${rel}`;
-  if ((await exec("test", ["-f", dest])).code === 0) return rel;
-  await exec("mkdir", ["-p", `${appHome()}/${DATA_DIR}/repo`]);
+  if ((await unix("test", ["-f", dest])).code === 0) return rel;
+  await unix("mkdir", ["-p", `${appHome()}/${DATA_DIR}/repo`]);
   const src = `${root}/${file}`;
   if (!machine) return (await place(src, dest, type)) ? null : rel;
   const b = await exec("sh", ["-c", 'base64 < "$1"', "sh", src], { on: machine });
@@ -105,7 +115,7 @@ async function repoFileIcon(root, machine) {
   const raw = `${dest}.src`;
   await writeFile(tmp, b.stdout);
   const ok =
-    (await exec("sh", ["-c", 'base64 -d < "$1" > "$2"', "sh", tmp, raw])).code === 0 &&
+    (await exec(await shProgram(), ["-c", 'base64 -d < "$1" > "$2"', "sh", tmp, raw])).code === 0 &&
     !(await place(raw, dest, type));
   await unlink(tmp).catch(() => {});
   await unlink(raw).catch(() => {});

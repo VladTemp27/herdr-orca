@@ -2,25 +2,28 @@
 // Markdown renders formatted (Source toggles to text); other files show as read-only code.
 import { div } from "gpui-kit";
 import { v_flex, h_flex, Editor, EditorState, TextView } from "gpui-base";
-import { props, readTextFile, watchFolder, theme, settings, focused, spaces } from "herdr";
+import { props, readTextFile, watchFolder, theme, settings, focused, spaces, window } from "herdr";
 import { openFile } from "./tabs.js";
 import { syntaxColors, languageFor } from "./syntax.js";
 
 const LIMIT = 400000;
 const isMarkdown = path => /\.(md|markdown|mdx)$/i.test(path ?? "");
-const dirname = path => path.slice(0, path.lastIndexOf("/")) || "/";
+const windows = on => !on && window()?.platform === "windows";
+const dirname = (path, on) => path.slice(0, windows(on) ? Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) : path.lastIndexOf("/")) || "/";
+const drive = /^[A-Za-z]:[\\/]/; // a Windows absolute path
 
 // A relative or absolute link, resolved against the current file's folder.
-function resolve(file, href) {
+function resolve(file, href, on) {
   let p;
   try { p = decodeURIComponent(href.split("#")[0]); } catch { return null; }
   if (!p) return null;
   const parts = [];
-  for (const s of (p.startsWith("/") ? p : `${dirname(file)}/${p}`).split("/")) {
+  const full = p.startsWith("/") || (windows(on) && drive.test(p)) ? p : `${dirname(file, on)}/${p}`;
+  for (const s of (windows(on) ? full.replace(/\\/g, "/") : full).split("/")) {
     if (!s || s === ".") continue;
     if (s === "..") parts.pop(); else parts.push(s);
   }
-  return "/" + parts.join("/");
+  return windows(on) && drive.test(full) ? parts.join("/") : "/" + parts.join("/");
 }
 
 // A plain class: main.js (the View) owns it and forwards init, render and close.
@@ -59,7 +62,7 @@ export default class Viewer {
   // Local files reload when saved elsewhere; watchFolder only works on this machine.
   watch(cx) {
     if (this.on) return;
-    const dir = dirname(this.file);
+    const dir = dirname(this.file, this.on);
     if (this.watching === dir) return;
     this.watching = dir;
     cx.spawn(async cx => {
@@ -67,7 +70,8 @@ export default class Viewer {
         while (!this.closed && this.watching === dir) {
           const changed = await watchFolder(dir);
           if (this.closed || this.watching !== dir) return;
-          if (changed.some(c => c.endsWith(this.file) || this.file.startsWith(c + "/"))) this.load(cx);
+          const slash = p => windows(this.on) ? p.replace(/\\/g, "/") : p, file = slash(this.file);
+          if (changed.map(slash).some(c => c.endsWith(file) || file.startsWith(c + "/"))) this.load(cx);
         }
       } catch { if (this.watching === dir) this.watching = null; }
     });
@@ -76,7 +80,7 @@ export default class Viewer {
   // Linked files open in their own tab, like clicks in the Files panel.
   followLink(url, cx) {
     if (/^(https?|mailto):/i.test(url)) return cx.open_url(url);
-    const next = resolve(this.file, url);
+    const next = resolve(this.file, url, this.on);
     if (!next || next === this.file) return;
     const space = focused()?.space ?? spaces().find(s => s.active)?.id;
     openFile({ file: next, on: this.on, space }, cx);

@@ -234,6 +234,9 @@ Project settings, Excalidraw (cmd-shift-e), Open in VS Code (cmd-g) and context 
   only the documented syntax names take effect; so comments and punctuation share one gray
   (`#8b949e` dark, `#6e7781` light) or a comment's slashes would differ from its text.
 - The hover card is a `window` overlay (doesn't take the keyboard); worktree badges need `gh`.
+- Windows paths and avatars: Git says `C:/x` where Herdr says `C:\x`, in any case, so local badges and
+  links compare one spelling. Remote Unix paths keep their case and backslashes. `convert` there is System32's disk converter: JPEG avatars go through
+  System.Drawing, and the rest of that script runs in Git's `sh` (`git/sh.js`).
 - Remote machines: prefill falls back to the clipboard; media and watchers are local-only.
 - `herdr.yaml` / `orca.yaml` are parsed only for `scripts.setup` (one line, or a `|` / `>` block),
   not as full YAML. `herdr.yaml` wins when both exist.
