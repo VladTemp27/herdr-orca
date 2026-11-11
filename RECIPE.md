@@ -213,6 +213,8 @@ Project settings, Excalidraw (cmd-shift-e), Open in VS Code (cmd-g) and context 
   the card or `setShared` (which redraws every mod in the window): `spaces.js` only treats a hover
   as real when the pointer moved in the last 150ms, writes `better-sidebar.hover` only while a card
   is open, and gives the scroll area a stable `.id("spaces-list")`.
+- Usage limits on Windows: the helpers run in Git's `sh` (`sh.js`, found from `git --exec-path`).
+  Git Bash FIFOs don't reach native programs, so they pipe instead.
 - There's no element drag-and-drop in mods (`on_drop` is only for files from outside): a drag is
   `on_mouse_down` on a row, then `on_mouse_move` / `on_mouse_up` on whatever is under the pointer,
   so every drop target handles both. Reset the drag state on the list's own `on_mouse_up`, which

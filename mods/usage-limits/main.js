@@ -11,6 +11,7 @@ import { barModel, cardModel, chooseDensity, panelOnEnter } from "./lib/view.js"
 import { effectivePrefs, isOnBar, isShown, toggleOnBar, toggleProvider, toggleShowBars, toggleShowRemaining, toggleShowResetTime, toggleWindow } from "./lib/prefs.js";
 import { parseSession, sessionOnBar, sessionView } from "./lib/session.js";
 import { nextState } from "./lib/state.js";
+import { shProgram } from "./sh.js";
 
 const MOD = "usage-limits";
 const KEY_STATE = "usage-limits.state";
@@ -86,7 +87,7 @@ export default class UsageLimits extends View {
       let next;
       const prev = states()[p.id] ?? { report: null, lastGood: null, installed: null };
       try {
-        const r = await exec("sh", [`${appHome()}/mods/${MOD}/${p.helper}`]);
+        const r = await exec(await shProgram(), [`${appHome()}/mods/${MOD}/${p.helper}`]);
         next = r.code === 127 ? nextState(prev, null, false) : nextState(prev, p.parse(r.stdout, now()), true);
       } catch (e) {
         next = { ...prev, report: { status: "error", message: String(e?.message ?? e), plan: null, observedAt: now(), source: p.helper, windows: [] } };
@@ -115,9 +116,9 @@ export default class UsageLimits extends View {
         const app = AGENTS[info.status?.app];
         const pid = info.foreground?.pid;
         if (app && pid) {
-          const r = await exec("sh", [`${appHome()}/mods/${MOD}/helpers/session.sh`, app, String(pid)]);
+          const r = await exec(await shProgram(), [`${appHome()}/mods/${MOD}/helpers/session.sh`, app, String(pid)]);
           const data = r.code === 0 ? parseSession(r.stdout, app) : null;
-          if (data) next = { data, title: (info.cwd ?? "").split("/").pop() };
+          if (data) next = { data, title: (info.cwd ?? "").split(/[\\/]/).pop() };
         }
       } catch {
         next = null;
