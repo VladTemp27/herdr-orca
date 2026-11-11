@@ -235,6 +235,9 @@ Project settings, Excalidraw (cmd-shift-e), Open in VS Code (cmd-g) and context 
   (`#8b949e` dark, `#6e7781` light) or a comment's slashes would differ from its text.
 - The hover card is a `window` overlay (doesn't take the keyboard); worktree badges need `gh`.
 - Remote machines: prefill falls back to the clipboard; media and watchers are local-only.
+- Live ports on Windows: this computer is read with `netstat` (foreign port 0 is a listener, in any
+  language) and ports match by process ancestry, since Windows can't read another process's folder.
+  Other machines still go through `scanMachine`.
 - `herdr.yaml` / `orca.yaml` are parsed only for `scripts.setup` (one line, or a `|` / `>` block),
   not as full YAML. `herdr.yaml` wins when both exist.
   The setup script also runs when Create opens an existing checkout that has no space open yet.

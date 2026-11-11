@@ -1,5 +1,5 @@
 // Listening TCP ports on each machine that holds spaces, matched to the worktree spaces they run in.
-import { exec, readTextFile } from "herdr";
+import { exec, hc, readTextFile, terminals } from "herdr";
 
 export const SHARED_KEY = "live-ports";
 
@@ -99,6 +99,83 @@ async function spaceRoots(on, spaceList, paneList) {
   return out.sort((a, b) => b.root.length - a.root.length); // deepest checkout wins
 }
 
+// Windows: no lsof, and no way to read another process's folder. A port belongs to the
+// space whose terminal started it, found through the process's ancestors.
+// ponytail: servers started outside Herdr count as external, even inside a worktree.
+const procs = new Map(); // pid -> { name, chain: [pid, parent, grandparent, ...] }
+const shells = new Map(); // terminal address -> { pid, space, parent }
+
+// `netstat -ano`: "TCP  [::]:3000  [::]:0  LISTENING  1234". The state word is
+// localized, so a listener is told by its foreign port 0.
+function parseNetstat(out) {
+  const seen = new Map();
+  for (const line of out.split(/\r?\n/)) {
+    const m = line.trim().match(/^TCP\s+(\S+):(\d+)\s+\S+:0\s+.*\s(\d+)$/);
+    const pid = m && Number(m[3]);
+    if (!pid) continue;
+    const port = Number(m[2]);
+    const key = `${pid}:${port}`;
+    if (!seen.has(key)) seen.set(key, { pid, port, host: m[1] });
+  }
+  return [...seen.values()].sort((a, b) => a.port - b.port);
+}
+
+// Refresh each scan: Windows can reuse a listener PID between scans.
+async function loadChains(pids) {
+  procs.clear();
+  if (!pids.length) return;
+  const r = await exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command",
+    "Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,Name | ForEach-Object { '{0} {1} {2}' -f $_.ProcessId, $_.ParentProcessId, $_.Name }"]);
+  const all = new Map();
+  for (const line of r.stdout.split(/\r?\n/)) {
+    const m = line.match(/^(\d+) (\d+) (.+)$/);
+    if (m) all.set(Number(m[1]), { ppid: Number(m[2]), name: m[3].replace(/\.exe$/i, "") });
+  }
+  for (const pid of pids) {
+    const chain = [];
+    // Windows keeps a dead parent's pid, which may be reused: stop at a loop.
+    for (let p = pid; all.has(p) && !chain.includes(p); p = all.get(p).ppid) chain.push(p);
+    procs.set(pid, { name: all.get(pid)?.name ?? null, chain });
+  }
+}
+
+// Refresh shell PIDs and labels: a recovered terminal can keep its address.
+async function loadShells() {
+  const live = terminals().filter((t) => !t.address.includes("/") && (t.state ?? "live") === "live");
+  shells.clear();
+  for (const t of live) {
+    const r = await hc(["get", "--json", t.address]).catch(() => null);
+    try {
+      const j = JSON.parse(r.stdout);
+      shells.set(t.address, { pid: j.pid ?? null, space: j.labels?.["herdr.space"] ?? null, parent: j.parent ?? null });
+    } catch {}
+  }
+}
+
+function shellSpace(address, seen = new Set()) {
+  const s = shells.get(address);
+  if (!s || seen.has(address)) return null;
+  seen.add(address);
+  return s.space ?? (s.parent ? shellSpace(s.parent, seen) : null);
+}
+
+async function scanWindows() {
+  const listeners = parseNetstat((await exec("netstat", ["-ano"])).stdout);
+  await loadChains([...new Set(listeners.map((l) => l.pid))]);
+  await loadShells();
+  const spaceOfPid = new Map([...shells].map(([address, s]) => [s.pid, shellSpace(address)]));
+  const bySpace = {};
+  const external = [];
+  for (const l of listeners) {
+    const p = procs.get(l.pid);
+    const space = p?.chain.map((pid) => spaceOfPid.get(pid)).find(Boolean);
+    const port = { port: l.port, pid: l.pid, name: p?.name ?? `PID ${l.pid}`, address: `localhost:${l.port}`, machine: null, reachable: true };
+    if (space) (bySpace[space] ??= []).push(port);
+    else external.push(port);
+  }
+  return { bySpace, external };
+}
+
 async function scanMachine(on, spaceList, paneList, appOnWindows) {
   const bySpace = {};
   const external = [];
@@ -119,15 +196,15 @@ async function scanMachine(on, spaceList, paneList, appOnWindows) {
   return { bySpace, external };
 }
 
-// Scans every machine that holds spaces (skipping ones machines() reports unavailable), and this
-// computer unless the app runs on Windows, which has no lsof. Machines are scanned in parallel, so a
-// slow one doesn't hold up the rest; one that fails keeps its ports from `previous` (the last result).
+// Scans this computer and every machine that holds spaces (skipping ones machines() reports
+// unavailable). Machines are scanned in parallel, so a slow one doesn't hold up the rest; one that
+// fails keeps its ports from `previous` (the last result). A Windows computer has no lsof: netstat.
 export async function scanPorts(spaceList, paneList, machineList, platform, previous) {
   const down = new Set(machineList.filter((m) => m.layout === "unavailable").map((m) => m.name));
   const targets = new Set(spaceList.map((s) => s.machine ?? null).filter((on) => on !== null && !down.has(on)));
-  if (platform !== "windows") targets.add(null);
+  targets.add(null);
   const order = [null, ...[...targets].filter(Boolean).sort()].filter((on) => targets.has(on));
-  const results = await Promise.allSettled(order.map((on) => scanMachine(on, spaceList, paneList, platform === "windows")));
+  const results = await Promise.allSettled(order.map((on) => (on === null && platform === "windows" ? scanWindows() : scanMachine(on, spaceList, paneList, platform === "windows"))));
   const bySpace = {};
   const external = [];
   order.forEach((on, i) => {
