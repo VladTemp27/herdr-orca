@@ -25,6 +25,19 @@ function slotWindows(limitId, limitName, slots) {
   return out;
 }
 
+// Free rate-limit resets. No count means Codex didn't report them, which is not the same as 0.
+function resetCredits(c) {
+  if (!Number.isFinite(c?.availableCount)) return null;
+  const expiries = (c.credits ?? [])
+    .filter((x) => x.status?.toLowerCase() === "available")
+    .map((x) => toEpoch(x.expiresAt))
+    .filter((at) => at != null);
+  return {
+    count: Math.max(0, Math.floor(c.availableCount)),
+    nextExpiresAt: toEpoch(c.nextExpiresAt) ?? (expiries.length ? Math.min(...expiries) : null),
+  };
+}
+
 function fromRpc(result, now) {
   const byId = result.rateLimitsByLimitId ?? (result.rateLimits ? { [result.rateLimits.limitId ?? "codex"]: result.rateLimits } : {});
   const ids = Object.keys(byId).sort((a, b) => (a === "codex" ? -1 : b === "codex" ? 1 : 0));
@@ -33,7 +46,8 @@ function fromRpc(result, now) {
     return slotWindows(id, r.limitName, [["primary", r.primary], ["secondary", r.secondary]]);
   });
   const plan = result.rateLimits?.planType ?? byId[ids[0]]?.planType ?? null;
-  return windows.length ? okReport("codex app-server", now, windows, plan) : errorReport("codex app-server", "No limits in Codex reply", now);
+  if (!windows.length) return errorReport("codex app-server", "No limits in Codex reply", now);
+  return { ...okReport("codex app-server", now, windows, plan), resets: resetCredits(result.rateLimitResetCredits) };
 }
 
 // A logged snapshot is never a live reading: the provider is failing, and the
@@ -57,10 +71,27 @@ export function parse(text, now) {
   return errorReport("codex app-server", "No reply from Codex", now);
 }
 
+const OUTCOMES = {
+  reset: { ok: true, message: "Your limits are reset." },
+  alreadyRedeemed: { ok: true, message: "Your limits are reset." },
+  nothingToReset: { ok: false, message: "No Codex limit can be reset right now." },
+  noCredit: { ok: false, message: "You have no resets left." },
+};
+
+// helpers/codex-reset.sh's answer. settled: false means a credit may or may not have
+// been spent, so the next try has to reuse the same key.
+export function parseReset(text) {
+  const m = jsonLines(text).find((line) => line.id === 2);
+  const known = OUTCOMES[m?.result?.outcome];
+  if (known) return { ...known, settled: true };
+  return { ok: false, settled: false, message: String(m?.error?.message ?? "No answer from Codex. Trying again won't use a second reset.") };
+}
+
 export default {
   id: "codex",
   name: "Codex",
   icon: "icons/codex.svg",
   helper: "helpers/codex-limits.sh",
   parse,
+  reset: { helper: "helpers/codex-reset.sh", parse: parseReset },
 };

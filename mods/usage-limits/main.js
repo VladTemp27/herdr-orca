@@ -1,16 +1,17 @@
 // Usage limits: every Claude Code / Codex limit window in the status bar, and one
-// panel on hover: the details, and behind ⚙ the checkboxes to choose what shows.
+// panel on press: the details, and behind ⚙ the checkboxes to choose what shows.
 //
 // Data comes from small helpers that run the CLIs themselves (helpers/*.sh);
 // this mod never reads a token. Everything below main.js is pure and tested.
 import { View, div, image, svg } from "gpui-kit";
-import { HoverCard, h_flex, v_flex } from "gpui-base";
-import { exec, focused, theme, props, shared, setShared, appHome } from "herdr";
+import { Popover, h_flex, v_flex } from "gpui-base";
+import { exec, focused, theme, props, shared, setShared, appHome, notify } from "herdr";
 import { PROVIDERS } from "./providers/index.js";
-import { barModel, cardModel, chooseDensity, panelOnEnter } from "./lib/view.js";
+import { barModel, cardModel, chooseDensity } from "./lib/view.js";
 import { effectivePrefs, isOnBar, isShown, toggleOnBar, toggleProvider, toggleShowBars, toggleShowRemaining, toggleShowResetTime, toggleWindow } from "./lib/prefs.js";
 import { parseSession, sessionOnBar, sessionView } from "./lib/session.js";
 import { nextState } from "./lib/state.js";
+import { shProgram } from "./sh.js";
 
 const MOD = "usage-limits";
 const KEY_STATE = "usage-limits.state";
@@ -19,7 +20,8 @@ const KEY_REFRESH = "usage-limits.refresh";
 const FETCH_EVERY = 5 * 60;       // s, installed providers
 const MISSING_EVERY = 60 * 60;    // s, not-installed providers
 const REFRESH_COOLDOWN = 30;      // s
-const SESSION_EVERY = 10 * 1000;   // ms, at most this often on hover
+const RESET_TIMEOUT = 40 * 1000;  // ms, past the 30 s helpers/codex-reset.sh waits for an answer
+const SESSION_EVERY = 10 * 1000;   // ms, at most this often on opening the panel
 const AGENTS = { "claude-code": "claude", codex: "codex" }; // Herdr's app name → session.sh
 const BAR_W = 30;
 const PANEL_W = 360;
@@ -28,8 +30,6 @@ const PANEL_BAR_W = 96;
 const PCT_W = { used: 40, remaining: 66 };
 const SESSION_BAR_W = 60;
 const LEFT_W = 48;                   // the time-left column in the panel
-const PANEL_OPEN_DELAY = 350;       // ms, so passing over the bar doesn't flash it
-const PANEL_CLOSE_DELAY = 300;      // ms, lets the pointer cross from the bar to the card
 
 const now = () => Math.floor(Date.now() / 1000);
 const states = () => shared(KEY_STATE) ?? {};
@@ -55,7 +55,10 @@ export default class UsageLimits extends View {
   init(_props, cx) {
     this.width = 0;
     this.panel = "limits"; // or "settings"
-    this.leftAt = null;    // ms, when the pointer left the bar and the panel
+    this.open = false;     // the panel, opened by pressing the limits
+    this.confirming = false; // "Reset now" was pressed and waits for its second press
+    this.resetBusy = false;
+    this.resetKey = null;  // this attempt's key, kept until its outcome is known
     this.terminal = null;  // the focused terminal the session below belongs to
     this.session = null;   // { data: Session, title } or null
     this.sessionAt = 0;    // ms, last session read
@@ -86,7 +89,7 @@ export default class UsageLimits extends View {
       let next;
       const prev = states()[p.id] ?? { report: null, lastGood: null, installed: null };
       try {
-        const r = await exec("sh", [`${appHome()}/mods/${MOD}/${p.helper}`]);
+        const r = await exec(await shProgram(), [`${appHome()}/mods/${MOD}/${p.helper}`]);
         next = r.code === 127 ? nextState(prev, null, false) : nextState(prev, p.parse(r.stdout, now()), true);
       } catch (e) {
         next = { ...prev, report: { status: "error", message: String(e?.message ?? e), plan: null, observedAt: now(), source: p.helper, windows: [] } };
@@ -115,9 +118,9 @@ export default class UsageLimits extends View {
         const app = AGENTS[info.status?.app];
         const pid = info.foreground?.pid;
         if (app && pid) {
-          const r = await exec("sh", [`${appHome()}/mods/${MOD}/helpers/session.sh`, app, String(pid)]);
+          const r = await exec(await shProgram(), [`${appHome()}/mods/${MOD}/helpers/session.sh`, app, String(pid)]);
           const data = r.code === 0 ? parseSession(r.stdout, app) : null;
-          if (data) next = { data, title: (info.cwd ?? "").split("/").pop() };
+          if (data) next = { data, title: (info.cwd ?? "").split(/[\\/]/).pop() };
         }
       } catch {
         next = null;
@@ -147,14 +150,42 @@ export default class UsageLimits extends View {
     return effectivePrefs(shared(KEY_PREFS), props());
   }
 
-  hover(on, cx) {
-    if (!on) {
-      this.leftAt = Date.now();
-      return;
-    }
-    this.panel = panelOnEnter(this.panel, this.leftAt, Date.now(), PANEL_CLOSE_DELAY);
-    this.leftAt = null;
-    if (Date.now() - this.sessionAt >= SESSION_EVERY) this.readSession(cx);
+  // The panel opens on limits: settings last only until it closes.
+  setOpen(open, cx) {
+    this.open = open;
+    if (!open) {
+      this.panel = "limits";
+      this.confirming = false;
+    } else if (Date.now() - this.sessionAt >= SESSION_EVERY) this.readSession(cx);
+    cx.notify();
+  }
+
+  askReset(on, cx) {
+    this.confirming = on;
+    cx.notify();
+  }
+
+  // Spends a reset credit. The key outlives a failed try, so trying again can't spend a second one.
+  spendReset(p, cx) {
+    if (this.resetBusy) return;
+    this.resetBusy = true;
+    this.confirming = false;
+    this.resetKey ??= `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    const key = this.resetKey;
+    cx.spawn(async (cx) => {
+      let done;
+      try {
+        const r = await exec(await shProgram(), [`${appHome()}/mods/${MOD}/${p.reset.helper}`, key], { timeout: RESET_TIMEOUT });
+        done = p.reset.parse(r.stdout);
+      } catch (e) {
+        done = { ok: false, settled: false, message: String(e?.message ?? e) };
+      }
+      this.resetBusy = false;
+      if (done.settled) this.resetKey = null;
+      notify({ title: `${p.name} limits`, body: done.message, level: done.ok ? "success" : "error" });
+      this.fetch(p, cx);
+      cx.notify();
+    });
     cx.notify();
   }
 
@@ -187,7 +218,7 @@ export default class UsageLimits extends View {
       .bg(t.chrome).border_t(1).border_color(t.border).text_size(11.8).text_color(t.muted)
       .on_size_change((size, cx) => { this.width = size.width; cx.notify(); });
     // Only the limits themselves open the panel, not the empty rest of the block.
-    const content = h_flex().id("ul-content").gap(18).items_center().flex_none().on_hover((on, cx) => this.hover(on, cx))
+    const content = h_flex().id("ul-content").gap(18).items_center().flex_none().cursor_pointer()
       .child(div().flex_none().text_color(t.dim).child(prefs.showRemaining ? "Remaining" : "Used"));
     const showBars = prefs.showBars && this.compactWidth(model, numbersWidth, true) <= this.width - 70;
     if (numbers.length) {
@@ -201,9 +232,10 @@ export default class UsageLimits extends View {
     // With no CLI installed there are no limits to show, so settings are all there is.
     const body = this.panel === "settings" || panel.empty ? this.settings(!panel.empty, t) : this.limits(panel, t);
     const cooling = this.cooling();
-    return root.child(HoverCard.new("ul-panel").anchor(left ? "bottom_left" : "bottom_right").open_delay(PANEL_OPEN_DELAY).close_delay(PANEL_CLOSE_DELAY)
+    return root.child(Popover.new("ul-panel").anchor(left ? "bottom_left" : "bottom_right").open(this.open)
+      .on_open_change((open, cx) => this.setOpen(open, cx))
       .trigger(content)
-      .content(body))
+      .when(this.open, (e) => e.content(body)))
       .child(this.iconButton("ul-bar-refresh", "refresh", cooling ? "Refreshing…" : "Refresh now", !cooling, (cx) => this.refresh(cx), t));
   }
 
@@ -250,7 +282,35 @@ export default class UsageLimits extends View {
         .child(div().flex_1())
         .child(div().min_w(0).truncate().text_size(11).text_color(g.failed ? levelColor("hot", t) : t.dim).child(g.status)))
       .when(g.age != null, (e) => e.child(div().text_size(11).text_color(t.dim).child(g.age)))
-      .child(v_flex().gap(6).opacity(g.dim ? 0.55 : 1).children(g.rows.map((r) => this.cardRow(r, g.providerId, t))));
+      .child(v_flex().gap(6).opacity(g.dim ? 0.55 : 1).children(g.rows.map((r) => this.cardRow(r, g.providerId, t))))
+      .when(g.resets != null, (e) => e.child(this.resetsRow(g, t)));
+  }
+
+  // The free resets and their button. Spending one always takes a second press.
+  resetsRow(g, t) {
+    const r = g.resets;
+    const p = PROVIDERS.find((x) => x.id === g.providerId);
+    if (this.confirming) {
+      return v_flex().gap(6).p(8).rounded(6).bg(t.raised)
+        .child(div().font_semibold().child(`Reset ${g.name} limits?`))
+        .child(div().text_size(11).text_color(t.muted).child(`This uses one reset credit on your signed-in ${g.name} account and can't be undone.`))
+        .child(h_flex().gap(6).justify_end()
+          .child(this.textButton("ul-reset-cancel", "Cancel", true, (cx) => this.askReset(false, cx), t))
+          .child(this.textButton("ul-reset-confirm", "Reset now", true, (cx) => this.spendReset(p, cx), t, true)));
+    }
+    return h_flex().gap(8).items_center()
+      .child(v_flex().flex_1().min_w(0)
+        .child(div().truncate().text_size(11).text_color(t.muted).child(r.text))
+        .when(r.expiry != null, (e) => e.child(div().truncate().text_size(10.5).text_color(t.dim).child(r.expiry))))
+      .child(this.textButton("ul-reset", this.resetBusy ? "Resetting…" : "Reset now", r.count > 0 && !this.resetBusy, (cx) => this.askReset(true, cx), t));
+  }
+
+  textButton(id, label, enabled, onClick, t, primary = false) {
+    return div().id(id).flex_none().h(22).px(8).rounded(5).flex().items_center().whitespace_nowrap().text_size(11)
+      .when(primary, (e) => e.bg(t.solid).text_color(t.solid_foreground))
+      .when(!primary, (e) => e.border(1).border_color(t.border).text_color(enabled ? t.foreground : t.dim))
+      .when(enabled, (e) => e.cursor_pointer().hover((s) => s.bg(primary ? t.solid : t.hover)).on_click((_e, cx) => onClick(cx)))
+      .child(label);
   }
 
   sessionBlock(v, t) {
@@ -272,8 +332,7 @@ export default class UsageLimits extends View {
 
   shell(t) {
     return v_flex().id("ul-panel-body").w(PANEL_W).p(14).gap(14).rounded(10).border(1).border_color(t.border).bg(t.popover).shadow_lg()
-      .text_size(12.5).text_color(t.foreground)
-      .on_hover((on, cx) => this.hover(on, cx));
+      .text_size(12.5).text_color(t.foreground);
   }
 
   limits(model, t) {

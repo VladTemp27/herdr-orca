@@ -1,7 +1,8 @@
 // Shapes shared by every provider.
 //
 // Window: { id, short, long, percent (0–100), resetsAt (epoch s | null), durationSec (s | null) }
-// Report: { status: "ok" | "unavailable" | "error", message, plan, observedAt (epoch s), source, windows }
+// Report: { status: "ok" | "unavailable" | "error", message, plan, observedAt (epoch s), source, windows,
+//           resets? ({ count, nextExpiresAt (epoch s | null) } | null: only providers that report them) }
 
 export function makeWindow({ id, short, long, percent, resetsAt = null, durationSec = null }) {
   return {

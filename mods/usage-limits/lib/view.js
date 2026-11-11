@@ -1,4 +1,4 @@
-// What the bar and its hover card show, as plain data. Pure: no Herdr imports.
+// What the bar and its panel show, as plain data. Pure: no Herdr imports.
 import { timeLeft, level, pace, ago } from "./format.js";
 import { isShown } from "./prefs.js";
 import { PROVIDERS } from "../providers/index.js";
@@ -61,18 +61,30 @@ function cardRow(w, now, remaining = false) {
   };
 }
 
-// The hover panel: everything known. What's hidden is hidden from the bar only.
+// The free limit resets a provider reports. null hides the line; a count of 0 still shows.
+function resetsView(r, now) {
+  if (!r) return null;
+  const expires = r.count > 0 && r.nextExpiresAt != null && r.nextExpiresAt > now;
+  return {
+    count: r.count,
+    text: `${r.count} rate-limit reset${r.count === 1 ? "" : "s"} available`,
+    expiry: expires ? `${r.count === 1 ? "Expires" : "Next expires"} in ${timeLeft(r.nextExpiresAt - now)}` : null,
+  };
+}
+
+// The panel: everything known. What's hidden is hidden from the bar only.
 export function cardModel(states, now, providers = PROVIDERS, remaining = false) {
   const groups = [];
   for (const p of providers) {
     const { report = null, lastGood = null, installed = null } = states[p.id] ?? {};
     if (installed === false) continue;
-    const g = { providerId: p.id, name: p.name, icon: p.icon, plan: null, status: "loading…", failed: false, dim: false, age: null, rows: [] };
+    const g = { providerId: p.id, name: p.name, icon: p.icon, plan: null, status: "loading…", failed: false, dim: false, age: null, rows: [], resets: null };
     if (report?.status === "ok") {
       g.plan = report.plan ? cap(report.plan) : null;
       g.status = `updated ${ago(report.observedAt, now)}`;
       g.dim = now - report.observedAt > STALE_AFTER;
       g.rows = report.windows.map((w) => cardRow(w, now, remaining));
+      g.resets = resetsView(report.resets, now);
     } else if (report) {
       g.status = report.message ?? report.status;
       g.failed = true;
@@ -83,12 +95,6 @@ export function cardModel(states, now, providers = PROVIDERS, remaining = false)
     groups.push(g);
   }
   return { groups, empty: groups.length === 0 };
-}
-
-// The panel opens on limits: settings last only until it closes. It closes closeDelay
-// after the pointer leaves, and nothing reports that, so it's worked out on the way back.
-export function panelOnEnter(panel, leftAt, nowMs, closeDelay) {
-  return leftAt != null && nowMs - leftAt > closeDelay ? "limits" : panel;
 }
 
 // ProviderState: { report: Report|null, lastGood: Report|null, installed: true|false|null }
