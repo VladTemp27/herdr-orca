@@ -49,7 +49,10 @@ export default class Resources extends View {
     this.ticks = 0;
     cx.spawn(async (cx) => {
       if (!this.ram) {
-        const r = await exec("sysctl", ["-n", "hw.memsize", "hw.ncpu"]).catch(() => null);
+        // Both print RAM bytes, then logical cores.
+        const r = await (window()?.platform === "windows"
+          ? exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory; [Environment]::ProcessorCount"])
+          : exec("sysctl", ["-n", "hw.memsize", "hw.ncpu"])).catch(() => null);
         const [mem, ncpu] = (r?.stdout ?? "").trim().split(/\s+/).map(Number);
         this.ram = (mem || 0) / 1024;
         this.cores = ncpu || 1;

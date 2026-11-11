@@ -1,14 +1,19 @@
 // CPU and memory of every local Herdr terminal's process tree, by space, plus Herdr itself.
-import { exec, hc } from "herdr";
+import { exec, hc, appHome, window } from "herdr";
 
 const local = (address) => !address.includes("/");
 const base = (comm) => comm.split("/").pop() || comm;
+
+// Windows has no `ps -o`: procs.ps1 prints the same columns.
+const listProcs = () => window()?.platform === "windows"
+  ? exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", `${appHome()}/mods/resources/procs.ps1`])
+  : exec("ps", ["-axo", "pid=,ppid=,pcpu=,rss=,comm="]);
 
 // `ps -axo pid=,ppid=,pcpu=,rss=,comm=`: comm is last and may hold spaces.
 function parsePs(out) {
   const procs = new Map();
   const kids = new Map();
-  for (const line of out.split("\n")) {
+  for (const line of out.split(/\r?\n/)) {
     const m = line.match(/^\s*(\d+)\s+(\d+)\s+([\d.]+)\s+(\d+)\s+(.*)$/);
     if (!m) continue;
     const p = { pid: +m[1], ppid: +m[2], cpu: +m[3], rss: +m[4], comm: m[5] };
@@ -70,7 +75,7 @@ export class Meter {
   // terms: terminals() (address, state, program); spaceList: spaces().
   async measure(terms, spaceList, cores) {
     const live = terms.filter((t) => local(t.address) && (t.state ?? "live") === "live");
-    const ps = parsePs((await exec("ps", ["-axo", "pid=,ppid=,pcpu=,rss=,comm="])).stdout);
+    const ps = parsePs((await listProcs()).stdout);
     const addrs = new Set(live.map((t) => t.address));
     for (const a of this.info.keys()) if (!addrs.has(a)) this.info.delete(a);
     // New terminal, or its shell is gone (a lost terminal gets a new one at the same address).

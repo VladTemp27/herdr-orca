@@ -209,6 +209,8 @@ Project settings, Excalidraw (cmd-shift-e), Open in VS Code (cmd-g) and context 
 - Agents in spaces and the Agents panel are separate mod copies with their own `localStorage`
   (folds, time in state); the switch keeps one of them showing (`layout.hide` / `layout.show`
   on the `agents` block), and the layout ships with that block `"hidden": true`.
+- Resource meter on Windows: `procs.ps1` prints the same columns as `ps -axo`, from a 1s CPU
+  sample. Its output is CRLF.
 - Scrolling slides rows under a still pointer, firing a hover per row. Those hovers must not open
   the card or `setShared` (which redraws every mod in the window): `spaces.js` only treats a hover
   as real when the pointer moved in the last 150ms, writes `better-sidebar.hover` only while a card
