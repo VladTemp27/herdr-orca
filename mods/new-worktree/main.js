@@ -332,7 +332,7 @@ export default class NewWorktree extends View {
     }
     const agent = this.agents.find((a) => a.name === this.agent);
     const task = this.task(agent);
-    if (task) await this.prefill(task, cx);
+    if (task) await this.prefill(task, cx, path);
     // The setup script (Worktree Hooks in project settings) runs in your login shell ($SHELL -lic),
     // so what your profile puts on PATH (pnpm, nvm, mise…) is there, with the HERDR_* variables.
     // Waiting: setup, then the agent, in one terminal. Not waiting: the agent starts; setup gets its own tab.
@@ -376,12 +376,15 @@ export default class NewWorktree extends View {
   }
 
   // The issues mod's helper pastes the task into Claude's prompt once it's ready, without sending it.
-  // It watches this computer's terminals only and needs sh, so a remote space, or any space of a
-  // Windows app, gets the task on the clipboard (the app's own, so it works where pbcopy doesn't).
-  async prefill(task, cx) {
+  // It watches this computer's terminals only, so a remote space gets the task on the clipboard
+  // (the app's own, so it works where pbcopy doesn't).
+  async prefill(task, cx, path) {
     const platform = window()?.platform;
-    if (!this.on && platform !== "windows") {
-      await exec("sh", ["-c", 'nohup sh "$0" "$@" >/dev/null 2>&1 &', `${appHome()}/mods/issues/prefill.sh`, task]).catch(() => null);
+    if (!this.on) {
+      const helper = `${appHome()}/mods/issues/prefill`;
+      await (platform === "windows"
+        ? exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", `${helper}.ps1`, encodeURIComponent(JSON.stringify(task)), encodeURIComponent(JSON.stringify(path))])
+        : exec("sh", ["-c", 'nohup sh "$0" "$@" >/dev/null 2>&1 &', `${helper}.sh`, task])).catch(() => null);
       return;
     }
     cx.write_to_clipboard(task);

@@ -173,7 +173,7 @@ Project settings, Excalidraw (cmd-shift-e), Open in VS Code (cmd-g) and context 
   list from `agents()` and `terminals()` (`parent`), reusing the Agents panel's helpers), `my-tabs`, `my-pane`, `my-status`, `my-menu`
   (terminal and space menus; `terminal_menu: "my-menu"`), `my-new-menu`, `my-worktree` (remove
   confirm): modified clones of Herdr's mods.
-- `issues` (table, viewer, `projects.js`, `pr.js`, `start.js`, `prefill.sh`), `new-worktree` (dialog, `git.js`,
+- `issues` (table, viewer, `projects.js`, `pr.js`, `start.js`, `prefill.sh`, `prefill.ps1`), `new-worktree` (dialog, `git.js`,
   `hooks.js`), `project-settings` (with the same `hooks.js`: keep the two copies identical),
   `files-open-with` (+ `file-icons` for Material icons), `t3-actions`, `sidebar-nav`,
   `automations`, `usage-limits` (`helpers/*.sh`), `live-ports`, `desktop-notifications`,
@@ -202,6 +202,10 @@ Project settings, Excalidraw (cmd-shift-e), Open in VS Code (cmd-g) and context 
 - `hc wait <your own terminal>` doesn't honour `--timeout`; don't use it to sleep.
 - Claude prints a non-breaking space after `❯`; the prefill helper matches `^❯` and waits past the
   folder-trust prompt.
+- Issue prefill on Windows: `prefill.ps1` does `prefill.sh`'s job with PowerShell's JSON and
+  clipboard. Herdr starts Claude as `powershell.exe -NoExit -Command "& 'claude'"`, so it matches
+  the terminal's `argv`, not its foreground. In PowerShell, `.terminals.address` is the .NET array's
+  own `Address` method: use `ForEach-Object address`.
 - `cx.spawn` runs synchronously until its first `await`; don't call into state the constructor
   hasn't built yet.
 - GitHub only links "Closes #N" when the PR targets the default branch; badges also read the body
