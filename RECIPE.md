@@ -33,7 +33,9 @@ at 12,16 over the sidebar. The root background is `canvas`; terminals have 14×1
     while agents show in spaces, the Agents panel toggle, Add machine.
   - A space put to sleep shows a moon and **Asleep** on its second line.
 - **Tab bar** (42px): the sidebar toggle (it hides the whole sidebar and stays in the tab bar, so it can always bring it back; a rail from Herdr's brand button becomes a hide), `my-tabs` pills for the space's tabs; a **▶ Dev | ▾** run button
-  (`t3-actions`, 108px); the right-panel toggle (36px).
+  (`t3-actions`, 108px); the right-panel toggle (36px); on Windows and Linux, the window's
+  minimize, maximize and close last (`my-tabs` with `part: "window"`, 104px, hidden until the bar
+  shows it).
 - **Main**: the active tab's panes as cards (radius 10, gap 8, 1px `border`, `accent` when focused,
   framed even when alone) with a 30px `my-pane` header: program icon, agent name, folder, status,
   and split/zoom/close on the right.

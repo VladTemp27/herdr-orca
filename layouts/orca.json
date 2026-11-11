@@ -130,6 +130,21 @@
                     "px": 36
                   },
                   "window_drag": true
+                },
+                {
+                  "id": "window-buttons",
+                  "type": "block",
+                  "content": {
+                    "mod": "my-tabs",
+                    "props": {
+                      "part": "window"
+                    }
+                  },
+                  "size": {
+                    "px": 104
+                  },
+                  "window_drag": true,
+                  "hidden": true
                 }
               ],
               "size": {

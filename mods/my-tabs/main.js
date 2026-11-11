@@ -1,6 +1,6 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { spaces, panes, run, openOverlay, theme, window, shared, layout, settings, exec, focused, nextCommand } from "herdr";
+import { spaces, panes, run, openOverlay, theme, window, shared, layout, settings, exec, focused, nextCommand, props } from "herdr";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -59,6 +59,10 @@ function railToHidden(sidebar) {
 
 export default class Tabs extends View {
   init(_props, cx) {
+    // The window buttons' copy draws them and nothing else (it mustn't take the close keys too).
+    if (props()?.part === "window") return;
+    // Where the system draws no window buttons (Windows, Linux), they go in the bar's last block.
+    if (window()?.buttons && find(layout(), "window-buttons")) run("layout.show", { id: "window-buttons" });
     this.pressed = null;
     this.panels = JSON.parse(localStorage.getItem("panels") ?? "{}");
     // "close-tab[:id]" / "close-pane[:id]" from cmd-w, cmd-shift-w (layout:orca-* keys) and my-menu's tab Close.
@@ -107,6 +111,14 @@ export default class Tabs extends View {
     const stop = (_e, cx) => cx.stop_propagation();
     const button = (id, label, action) => div().id(id).size(26).flex_none().flex().items_center().justify_center().rounded(6).text_color(t.dim).hover(s => s.bg(t.hover).text_color(t.foreground))
       .on_mouse_down("left", stop).on_click(action).child(label);
+    // The layout's "window-buttons" block, right of Add action and the panel toggle.
+    if (props()?.part === "window") {
+      const w = window();
+      return h_flex().size_full().px(10).gap(3).items_center().justify_end().bg(t.chrome).border_b(1).border_color(t.border)
+        .when(w?.buttons, el => el.child(button("minimize", w.platform === "windows" ? svg("mods/my-tabs/win-min.svg").size(16) : "−", () => run("window.minimize")))
+          .child(button("maximize", w.platform === "windows" ? svg(`mods/my-tabs/${w.maximized ? "win-restore" : "win-max"}.svg`).size(16) : "□", () => run("window.maximize")))
+          .child(button("close-window", w.platform === "windows" ? svg("mods/my-tabs/win-close.svg").size(16) : svg("mods/pane/close.svg").size(13), () => run("window.close"))));
+    }
     const item = (c, i) => {
       const program = panes().find(p => p.tab === c.id && p.program?.agent)?.program ?? panes().find(p => p.tab === c.id)?.program;
       const name = /^tb\d+$/.test(c.name) ? program?.name ?? "Terminal" : c.name;
@@ -158,9 +170,6 @@ export default class Tabs extends View {
       .child(h_flex().id("excalidraw").h(26).px(8).gap(5).flex_none().items_center().rounded(6).text_size(12).text_color(t.muted)
         .hover(s => s.bg(t.hover).text_color(t.foreground)).tooltip("Open a drawing (⌘⇧E)").on_mouse_down("left", stop)
         .on_click(() => run("mod.open", { name: "excalidraw" }))
-        .child(svg("mods/excalidraw/icons/freedraw.svg").size(14)).child("Excalidraw"))
-      .when(w?.buttons, el => el.child(button("minimize", w.platform === "windows" ? svg("mods/my-tabs/win-min.svg").size(16) : "−", () => run("window.minimize")))
-        .child(button("maximize", w.platform === "windows" ? svg(`mods/my-tabs/${w.maximized ? "win-restore" : "win-max"}.svg`).size(16) : "□", () => run("window.maximize")))
-        .child(button("close-window", w.platform === "windows" ? svg("mods/my-tabs/win-close.svg").size(16) : svg("mods/pane/close.svg").size(13), () => run("window.close"))));
+        .child(svg("mods/excalidraw/icons/freedraw.svg").size(14)).child("Excalidraw"));
   }
 }

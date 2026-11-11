@@ -23,12 +23,13 @@ function element() {
 const find = (node, id) => !node || typeof node !== "object" ? null : node.key === id ? node : node.items.map(c => find(c, id)).find(Boolean) ?? null;
 
 const state = {}, calls = [];
-let sidebar;
+let sidebar, windowBlock;
+let viewProps = {}, windowInfo = { platform: "macos" };
 const env = {
   View: class {}, div: element, h_flex: element, svg: element, image: element,
-  theme: () => new Proxy({}, { get: () => "#000" }), settings: () => ({ zoom: 1 }), window: () => ({ platform: "macos" }),
-  layout: () => ({ id: "root", children: [sidebar] }), shared: (k) => state[k],
-  run: (name, args) => calls.push([name, JSON.parse(JSON.stringify(args))]), spaces: () => [], panes: () => [], focused: () => null,
+  theme: () => new Proxy({}, { get: () => "#000" }), settings: () => ({ zoom: 1 }), window: () => windowInfo, props: () => viewProps,
+  layout: () => ({ id: "root", children: [sidebar, ...(windowBlock ? [windowBlock] : [])] }), shared: (k) => state[k],
+  run: (name, args) => calls.push([name, args == null ? args : JSON.parse(JSON.stringify(args))]), spaces: () => [], panes: () => [], focused: () => null,
   openOverlay() {}, exec() {}, nextCommand: () => new Promise(() => {}),
   localStorage: { getItem: () => null, setItem() {} },
 };
@@ -63,5 +64,30 @@ calls.length = 0;
 delete state["sidebar.width"];
 tabs.render();
 assert.equal(calls[0][1].px, 268);
+
+// The normal Windows copy reveals the last block and owns the close-command loop.
+calls.length = 0;
+sidebar = { id: "sidebar", size: { px: 268 } };
+windowBlock = { id: "window-buttons", hidden: true };
+windowInfo = { platform: "windows", buttons: true };
+let listeners = 0;
+new context.Mod().init({}, { spawn() { listeners++; } });
+assert.equal(listeners, 1);
+assert.deepEqual(calls, [["layout.show", { id: "window-buttons" }]]);
+
+// The window-only copy neither takes close commands nor renders tabs/sidebar controls.
+calls.length = 0;
+viewProps = { part: "window" };
+const controls = new context.Mod();
+controls.init({}, { spawn() { listeners++; } });
+assert.equal(listeners, 1);
+assert.deepEqual(calls, []);
+const bar = controls.render();
+assert.equal(find(bar, "sidebar-toggle"), null);
+assert.equal(find(bar, "tab-new"), null);
+for (const [id, command] of [["minimize", "window.minimize"], ["maximize", "window.maximize"], ["close-window", "window.close"]]) {
+  find(bar, id).handlers.on_click();
+  assert.deepEqual(calls.pop(), [command, undefined]);
+}
 
 console.log("my-tabs: ok");
