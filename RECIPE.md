@@ -230,6 +230,13 @@ Project settings, Excalidraw (cmd-shift-e), Open in VS Code (cmd-g) and context 
   with a new shell pid and nothing running; terminals still being recovered are held 15 min.
 - Ticking "Resume automatically next time" writes `after_restart` into `mods/hibernate/mod.json`,
   which reloads the mod.
+- Hibernate on Windows: herdr-core names the shell as a terminal's foreground even while it runs a
+  program, so `core.js` takes the shell's child (not `conhost`/`OpenConsole`) from one process list
+  per second; Codex runs as `node …\codex.js` and counts as `codex`. Stop is ctrl+c (`hc
+  interrupt`; PowerShell stays, there's no zsh launcher), then `taskkill /T /F`. Wake types
+  `Set-Location -LiteralPath '…'; if ($?) { & '…' }` (no `&&` in PowerShell 5.1). Codex's session
+  is the newest rollout whose first line has this `"cwd"`. A killed shell ends its terminal there,
+  so the restart offer only follows a real core loss or reboot.
 - The code view tags `//`, `/*` and string quotes as `punctuation`, which beats `comment`, and
   only the documented syntax names take effect; so comments and punctuation share one gray
   (`#8b949e` dark, `#6e7781` light) or a comment's slashes would differ from its text.
