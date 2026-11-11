@@ -4,10 +4,12 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import { theme, props, closeOverlay, pickFolder, run, exec, home, shared, setShared } from "herdr";
+import { shProgram, unix } from "./sh.js";
 
 const LOCATION = "projects.location";
-const tilde = (p) => (p && p.startsWith(home()) ? `~${p.slice(home().length)}` : p ?? "");
-const expand = (p) => (p.startsWith("~/") ? home() + p.slice(1) : p === "~" ? home() : p);
+// Home as ~, whichever slashes (git says C:/Users/x where Windows says C:\Users\x).
+const tilde = (p) => (p && p.replace(/\\/g, "/").startsWith(home().replace(/\\/g, "/")) ? `~${p.slice(home().length)}` : p ?? "");
+const expand = (p) => p.replace(/^~(?=$|[\\/])/, home());
 const icon = (name, size = 16) => svg(`mods/workspace-chrome/${name}.svg`).size(size).flex_none();
 // owner/repo or a GitHub URL (cloned with gh), else any git URL; and the folder it lands in.
 function source(text) {
@@ -72,14 +74,14 @@ export default class NewProject extends View {
   async parent() {
     const dir = expand(this.location.value().trim());
     if (!dir) throw new Error("Choose a default location for your projects first.");
-    const r = await exec("mkdir", ["-p", dir]).catch(() => null);
+    const r = await unix("mkdir", ["-p", dir]).catch(() => null);
     if (r?.code !== 0) throw new Error(`Can't use ${tilde(dir)}: ${(r?.stderr ?? "").trim() || "not writable"}`);
     setShared(LOCATION, dir);
     return dir;
   }
 
   async free(path) {
-    const r = await exec("test", ["-e", path]).catch(() => null);
+    const r = await unix("test", ["-e", path]).catch(() => null);
     return r?.code !== 0;
   }
 
@@ -96,7 +98,10 @@ export default class NewProject extends View {
         if (!(await this.free(dest))) throw new Error(`${tilde(dest)} already exists. Use Browse folder to open it.`);
         const cmd = src.gh ? `gh repo clone ${sh(src.gh)} ${sh(src.name)}` : `git clone ${sh(src.url)} ${sh(src.name)}`;
         this.close();
-        run("space.new", { folder: dir, argv: ["sh", "-c", `${cmd} && cd ${sh(src.name)} && exec "\${SHELL:-zsh}" -l`] });
+        // Windows: Git's sh, ending in PowerShell, Herdr's shell there.
+        const posix = await shProgram();
+        const shell = posix === "sh" ? 'exec "${SHELL:-zsh}" -l' : "exec powershell.exe -NoLogo";
+        run("space.new", { folder: dir, argv: [posix, "-c", `${cmd} && cd ${sh(src.name)} && ${shell}`] });
       } catch (e) { this.error = String(e?.message ?? e); this.busy = false; cx.notify(); }
     });
   }
@@ -110,7 +115,7 @@ export default class NewProject extends View {
       try {
         const dir = await this.parent(), dest = `${dir}/${name}`;
         if (!(await this.free(dest))) throw new Error(`${tilde(dest)} already exists. Use Browse folder to open it.`);
-        const r = await exec("sh", ["-c", 'mkdir "$1" && git -C "$1" init -q', "sh", dest]);
+        const r = await exec(await shProgram(), ["-c", 'mkdir "$1" && git -C "$1" init -q', "sh", dest]);
         if (r.code !== 0) throw new Error((r.stderr || "Couldn't create it").trim());
         this.close();
         run("space.new", { folder: dest });

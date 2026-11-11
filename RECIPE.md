@@ -238,6 +238,10 @@ Project settings, Excalidraw (cmd-shift-e), Open in VS Code (cmd-g) and context 
 - `herdr.yaml` / `orca.yaml` are parsed only for `scripts.setup` (one line, or a `|` / `>` block),
   not as full YAML. `herdr.yaml` wins when both exist.
   The setup script also runs when Create opens an existing checkout that has no space open yet.
+- Windows: only `Git\cmd` is on PATH, so `sh`, `cp`, `find`, `mkdir` and the like go through Git's
+  `bin/sh.exe`, found from `git --exec-path` (`sh.js`, one identical copy per mod that needs it;
+  its Unix `find`/`sort` come before System32's). Git says `C:/x` where Herdr says `C:\x`, in any
+  case: compare paths in one spelling.
 
 ## Done when
 

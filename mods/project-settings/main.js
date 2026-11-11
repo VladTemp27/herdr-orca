@@ -17,8 +17,9 @@ const PROMPTS = {
   issue_prompt: 'Work on GitHub issue #{number} in {repo}: "{title}". Read it first with: gh issue view {number} -R {repo} --comments',
   pr_prompt: 'Pick up GitHub pull request #{number} in {repo}: "{title}". Read it first with: gh pr view {number} -R {repo} --comments',
 };
-const tilde = (p) => (p && p.startsWith(home()) ? `~${p.slice(home().length)}` : p ?? "");
-const expand = (p) => (p.startsWith("~/") ? home() + p.slice(1) : p);
+// Home as ~, whichever slashes (git says C:/Users/x where Windows says C:\Users\x).
+const tilde = (p) => (p && p.replace(/\\/g, "/").startsWith(home().replace(/\\/g, "/")) ? `~${p.slice(home().length)}` : p ?? "");
+const expand = (p) => p.replace(/^~(?=[\\/])/, home());
 
 // Where a space is now: its first terminal's live folder, else where it was made.
 function place(s) {

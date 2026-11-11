@@ -1,12 +1,14 @@
 // Git and GitHub reads for the Create worktree dialog. Git runs on the space's
 // machine (`on`); gh runs here with -R, using the person's own login.
-import { exec, panes } from "herdr";
+import { exec, panes, window } from "herdr";
 
 // Same place as Herdr's worktree mod: <home>/.herdr/worktrees/<repo>/<branch, slashes as dashes>.
 export const ROOT = (home) => `${home}/.herdr/worktrees`;
 export const slug = (branch) => branch.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
 export const titleSlug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/, "");
-export const tilde = (path, home) => (home && path.startsWith(home) ? `~${path.slice(home.length)}` : path);
+// Normalize local Windows paths only; a remote machine may have case-sensitive Unix paths.
+export const norm = (p, on) => (p && !on && window()?.platform === "windows" ? p.replace(/\\/g, "/").toLowerCase() : p);
+export const tilde = (path, home, on) => (home && norm(path, on).startsWith(norm(home, on)) ? `~${path.slice(home.length)}` : path);
 
 // exec stops a command after 30s unless told otherwise: worktree add and fetch on a big repo pass up to 10 minutes.
 export async function git(cwd, args, on, timeout) {
