@@ -65,12 +65,12 @@ function items(p, git) {
         ["Rename", "space.rename", { id: tg.id }],
         ...(git ? [["Project settings…", "project-settings", { space: tg.id }]] : []),
         ...(git ? [["New worktree", "worktree", { space: tg.id, action: "new" }], ["Open worktree", "worktree", { space: tg.id, action: "open" }]] : []),
-        // hibernate mod: stop this Mac's space's programs, or start them again.
+        // hibernate mod: stop a space's programs (on this computer or another machine), or start them again.
         // better-sidebar's folders: a repo files with its worktrees, any other space by itself.
         // better-sidebar's worktree notes: one note per checkout, edited in its dialog.
         ["Note…", "note", { space: tg.id }],
         ["Move to folder…", "move-folder", { space: tg.id }],
-        ...(tg.id && !tg.id.includes("/") ? [shared("hibernate.sleeping")?.[tg.id] ? ["Wake space", "hibernate", { action: "wake", space: tg.id }] : ["Sleep space", "hibernate", { action: "sleep", space: tg.id }]] : []),
+        ...(tg.id ? [shared("hibernate.sleeping")?.[tg.id] ? ["Wake space", "hibernate", { action: "wake", space: tg.id }] : ["Sleep space", "hibernate", { action: "sleep", space: tg.id }]] : []),
         // A worktree space closes by removing its worktree (the dialog checks for unsaved work first).
         git === "linked" ? ["Close & remove worktree", "worktree", { space: tg.id, action: "remove" }] : ["Close", "space.close", { id: tg.id }],
       ];
