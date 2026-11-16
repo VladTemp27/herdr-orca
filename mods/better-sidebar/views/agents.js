@@ -121,11 +121,19 @@ export function icon(p, size, color) {
 }
 
 // What a row calls an agent: its tab's title, or failing that its own.
+// Panes are read once per render and each label once: reading them per label ran
+// past the 50 ms render budget on busy setups ("could not be re-rendered", herdr-app #485).
 export function agentLabel() {
-  const tabs = spaces().flatMap((s) => s.tabs);
+  const tabs = new Map(spaces().flatMap((s) => s.tabs).map((t) => [t.id, t]));
+  const byTab = new Map();
+  for (const p of panes()) if (p.terminal) (byTab.get(p.tab) ?? byTab.set(p.tab, []).get(p.tab)).push(p);
+  const labels = new Map();
   return (a) => {
-    const tab = tabs.find((candidate) => candidate.id === a.tab);
-    return tab ? title(tab, lead(tab)) : a.title || a.program?.name || "";
+    if (!labels.has(a.address)) {
+      const tab = tabs.get(a.tab);
+      labels.set(a.address, tab ? title(tab, lead(tab, byTab.get(tab.id) ?? [])) : a.title || a.program?.name || "");
+    }
+    return labels.get(a.address);
   };
 }
 

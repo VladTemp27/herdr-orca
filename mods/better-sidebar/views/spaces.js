@@ -962,15 +962,20 @@ export class Spaces {
 
   // The branch and PR must describe the same checkout: the space's first
   // terminal, matching Herdr's space naming and worktree grouping semantics.
+  // In a render it reads the render's panes and answers each space once (see render).
   checkoutStatus(w) {
-    const ps = panes();
+    const memo = this.frame?.status;
+    if (memo?.has(w.id)) return memo.get(w.id);
+    const ps = this.frame?.ps ?? panes();
     const folder = spaceFolder(w, ps);
     const tabs = new Set((w.tabs ?? []).map((tab) => tab.id));
     const branch =
       ps.find((pane) => tabs.has(pane.tab) && pane.cwd === folder)?.branch ??
       this.git[prPlaceKey(w.machine, folder)]?.branch;
     const status = this.prObserver.entries.get(prPlaceKey(w.machine, folder));
-    return status?.branch === branch ? status : null;
+    const result = status?.branch === branch ? status : null;
+    memo?.set(w.id, result);
+    return result;
   }
 
   checkoutPRs(w) {
@@ -1506,11 +1511,19 @@ export class Spaces {
   render() {
     const t = theme();
     const collapsed = (this.width ?? findNode(layout(), "sidebar")?.size?.px ?? Infinity) < 160;
-    this.agents.refresh();
-    const rows = this.grouped(t, collapsed);
-    this.scrollToActive();
-    // agent.next / agent.prev follow this list's space order, Agents panel or not.
-    setAgentOrder(this.agents.order(this.navOrder()));
+    // Every scroll step renders the whole list inside a 50 ms budget ("could not be
+    // re-rendered"). panes() copies the whole snapshot, so rows share one read.
+    this.frame = { ps: panes(), status: new Map() };
+    let rows;
+    try {
+      this.agents.refresh();
+      rows = this.grouped(t, collapsed);
+      this.scrollToActive();
+      // agent.next / agent.prev follow this list's space order, Agents panel or not.
+      setAgentOrder(this.agents.order(this.navOrder()));
+    } finally {
+      this.frame = null;
+    }
     return v_flex()
       .id("better-sidebar-root")
       .size_full()

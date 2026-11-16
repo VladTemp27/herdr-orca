@@ -219,6 +219,10 @@ Project settings, Excalidraw (cmd-shift-e), Open in VS Code (cmd-g) and context 
   runs after the target's.
 - Opening a folder when its space becomes active is done in the 250ms data timer, not in
   `render`: `setShared` from a render redraws every mod again.
+- A render gets 50 ms, and the spaces list renders whole on every scroll step: past that, the
+  view shows "This view could not be re-rendered". `panes()` and `spaces()` copy the whole snapshot
+  (~0.2-0.4 ms each with ~80 panes), so read them once per render, never per row or per label.
+  `node mods/better-sidebar/views/agents.check.cjs` checks agent labels read panes once.
 - `space.new` without a folder starts where the focused terminal is. From a worktree, that opens a
   second space on the same worktree, and removing either one deletes the folder under both: always
   pass the machine and its home (a remote's comes from `printenv HOME` there, cached), and check

@@ -27,6 +27,7 @@ Modified files:
 - `views/ui.js`: exports `RADIUS`.
 - `views/footer.js`: adapted to this layout; "N agents · N need you" while agents show in spaces.
 - `views/agents.js`: sets agent order only when the layout has no spaces list; exports its helpers (status mark, icon, labels, durations) for the spaces list;
+  agent labels read panes once per render (upstream's #485 fix, in this copy's own code);
   a sub-agent kept as a pane shows only nested under its parent (not also
   as its own row), and clicking it focuses its pane instead of peeking.
 - `git/pr-status.js`: finds each checkout's issue (git-config link, PR closing references,
