@@ -985,10 +985,11 @@ export class Spaces {
       : Boolean(event.modifiers?.control || event.modifiers?.platform);
   }
 
-  // The issues mod's viewer for an issue or PR; Cmd/Ctrl-click opens GitHub instead.
+  // The issues mod's viewer for an issue or PR; Cmd/Ctrl-click opens its URL.
   // Presses stop here: the row selects (and drags) on mouse-up.
-  linkBadge(id, w, { repo, number, pr, url, title, label, color, icon, compact }) {
+  linkBadge(id, w, { repo, number, pr, url, title, label, color, icon, compact, provider, state }) {
     const shortcut = window().platform === "macos" ? "Cmd" : "Ctrl";
+    const ref = provider ? `${provider} ${number}` : `${repo}#${number}`;
     return h_flex()
       .id(id)
       .gap(3)
@@ -996,7 +997,7 @@ export class Spaces {
       .items_center()
       .cursor_pointer()
       .text_color(color)
-      .tooltip(`${repo}#${number} · ${label}\n${title}\nClick to view · ${shortcut}-click for GitHub`)
+      .tooltip(`${ref} · ${label}\n${title}\nClick to view · ${shortcut}-click to open`)
       .on_mouse_down("left", (_e, cx) => {
         cx.stop_propagation();
         this.pressed = null;
@@ -1007,10 +1008,11 @@ export class Spaces {
         cx.stop_propagation();
         if (this.isPRLinkClick(event)) return cx.open_url(url);
         openOverlay({ mod: "issues", kind: "dialog", width: 0.86, height: 0.9, props: { issue: {
-          repo, number, on: null, pr, folder: spaceFolder(w, panes()), machine: w.machine ?? null } } });
+          repo, number, on: null, pr, provider, url, title, state,
+          folder: spaceFolder(w, panes()), machine: w.machine ?? null } } });
       })
       .child(Icon(icon).size(13).flex_none())
-      .when(!compact, (el) => el.child(div().text_size(TEXT.caption).child(`#${number}`)));
+      .when(!compact, (el) => el.child(div().text_size(TEXT.caption).child(provider ? number : `#${number}`)));
   }
 
   issueBadge(w, t) {
@@ -1019,6 +1021,7 @@ export class Spaces {
     const open = issue.state === "OPEN";
     return this.linkBadge(`space-issue-${w.id}-${issue.repository}-${issue.number}`, w, {
       repo: issue.repository, number: issue.number, pr: false, url: issue.url, title: issue.title,
+      provider: issue.provider, state: issue.state,
       label: open ? "Open issue" : "Closed issue", color: open ? t.ansi2 : t.ansi5, icon: open ? "issue" : "issue-closed",
     });
   }

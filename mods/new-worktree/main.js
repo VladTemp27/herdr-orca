@@ -117,13 +117,20 @@ export default class NewWorktree extends View {
       this.github = { prs, issues };
       // Issues → Start: open on that issue or PR, already picked.
       const want = props()?.pick;
-      if (want && !this.pick) {
+      if (want && !want.provider && !this.pick) {
         this.mode = want.kind === "pr" ? "pr" : "issue";
         this.search.set_value(`#${want.number}`);
         this.text = `#${want.number}`;
         this.select(this.items()[0] ?? null, cx);
       }
       cx.notify();
+    }
+    const want = props()?.pick;
+    if (want?.provider && !this.pick) {
+      this.mode = "issue";
+      this.setPick({ ...want, kind: "issue" });
+      this.search.set_value(String(want.number));
+      this.text = String(want.number);
     }
   }
 
@@ -161,6 +168,7 @@ export default class NewWorktree extends View {
 
   items() {
     const d = this.data, m = this.mode;
+    if (this.pick?.provider && m === "issue") return [this.pick];
     if (!d || m === "new") return [];
     const q = this.text.trim(), ql = q.toLowerCase();
     const has = (s) => !ql || s.toLowerCase().includes(ql);
@@ -310,9 +318,19 @@ export default class NewWorktree extends View {
       await g(["worktree", "add", "--no-track", "-b", branch, path, plan.from]);
     }
     // The sidebar reads these to show the issue and PR on the worktree.
-    const link = (key, n) => r.gh && git(r.main, ["config", `branch.${branch}.${key}`, `${r.gh}#${n}`], on);
-    if (pick.kind === "issue") { await link("herdr-issue", pick.number); if (pick.pr && branch === pick.pr.headRefName) await link("herdr-pr", pick.pr.number); }
-    if (pick.kind === "pr" && branch === pick.head) await link("herdr-pr", pick.number);
+    const link = (key, value) => git(r.main, ["config", `branch.${branch}.${key}`, value], on);
+    if (pick.kind === "issue") {
+      if (pick.provider && pick.provider !== "github") {
+        await link("herdr-issue", `${pick.provider}:${pick.number}`);
+        if (pick.url) await link("herdr-issue-url", pick.url);
+        if (pick.title) await link("herdr-issue-title", pick.title);
+        if (pick.state) await link("herdr-issue-state", pick.state);
+      } else if (r.gh) {
+        await link("herdr-issue", `${r.gh}#${pick.number}`);
+        if (pick.pr && branch === pick.pr.headRefName) await link("herdr-pr", `${r.gh}#${pick.pr.number}`);
+      }
+    }
+    if (pick.kind === "pr" && branch === pick.head && r.gh) await link("herdr-pr", `${r.gh}#${pick.number}`);
     await this.open(path, cx);
   }
 
@@ -364,15 +382,17 @@ export default class NewWorktree extends View {
   }
 
   task(agent) {
-    const pick = this.pick, repo = this.project.gh;
+    const pick = this.pick, external = pick?.provider && pick.provider !== "github";
+    const repo = external ? this.project?.name : this.project?.gh;
     if (props()?.task) return props().task;
     if (!agent || agent.run?.[0] !== "claude" || !repo) return null;
     if (pick.kind !== "issue" && pick.kind !== "pr") return null;
-    // issue_prompt / pr_prompt: the project's, else mod.json's, else the default; blank keeps the default.
     const key = `${pick.kind}_prompt`;
-    return String(this.own()[key] || this.settings[key] || DEFAULTS[key])
+    const providerDefault = pick.provider === "jira" ? 'Work on Jira issue {number}: "{title}". Read it at {url}.'
+      : pick.provider === "linear" ? 'Work on Linear issue {number}: "{title}". Read it at {url}.' : DEFAULTS[key];
+    return String(external ? providerDefault : this.own()[key] || this.settings[key] || providerDefault)
       .replaceAll("{number}", String(pick.number)).replaceAll("{title}", pick.title ?? "")
-      .replaceAll("{repo}", repo).replaceAll("{branch}", this.branch.value().trim());
+      .replaceAll("{repo}", repo ?? "").replaceAll("{url}", pick.url ?? "").replaceAll("{branch}", this.branch.value().trim());
   }
 
   // The issues mod's helper pastes the task into Claude's prompt once it's ready, without sending it.
