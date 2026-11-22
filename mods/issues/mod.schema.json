@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Orca Issues settings",
+  "type": "object",
+  "properties": {
+    "settings": {
+      "type": "object",
+      "title": "Issue provider",
+      "properties": {
+        "provider": {
+          "title": "Issue provider",
+          "description": "Choose which service supplies Orca's issues.",
+          "type": "string",
+          "enum": ["github", "jira", "linear"],
+          "default": "github",
+          "x-labels": { "github": "GitHub", "jira": "Jira Cloud", "linear": "Linear" }
+        },
+        "jira": {
+          "type": "object",
+          "title": "Jira Cloud",
+          "properties": {
+            "baseUrl": { "title": "Jira site URL", "type": "string", "default": "", "description": "HTTPS URL, such as https://example.atlassian.net." },
+            "email": { "title": "Account email", "type": "string", "default": "" },
+            "projects": { "title": "Project keys", "type": "array", "items": { "type": "string" }, "default": [], "description": "Comma-separated Jira project keys to include." }
+          }
+        },
+        "linear": {
+          "type": "object",
+          "title": "Linear",
+          "properties": {
+            "teams": { "title": "Team keys", "type": "array", "items": { "type": "string" }, "default": [], "description": "Comma-separated Linear team keys to include." },
+            "filters": {
+              "type": "object",
+              "title": "Advanced filters",
+              "properties": {
+                "status": { "title": "Status name", "type": "string", "default": "" },
+                "assignee": { "title": "Assignee name", "type": "string", "default": "" },
+                "label": { "title": "Label name", "type": "string", "default": "" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

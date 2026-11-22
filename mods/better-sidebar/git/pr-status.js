@@ -225,7 +225,16 @@ export class PRStatusObserver {
   async findIssue(git, branch, repositories, prs, fresh = false) {
     const pr = prs[0], repo = pr?.repository ?? [...repositories][0];
     const link = await git(["config", "--get", `branch.${branch}.herdr-issue`]);
-    const bound = /^([\w.-]+\/[\w.-]+)#([1-9][0-9]*)$/.exec(link.stdout?.trim() ?? "");
+    const value = link.stdout?.trim() ?? "";
+    const external = /^(jira|linear):([A-Za-z0-9_-]+)$/.exec(value);
+    if (external) {
+      const [title, url, state] = await Promise.all(["title", "url", "state"].map((key) =>
+        git(["config", "--get", `branch.${branch}.herdr-issue-${key}`])));
+      return { provider: external[1], repository: external[1] === "jira" ? "Jira" : "Linear", number: external[2],
+        title: title.stdout?.trim() ?? external[2], url: url.stdout?.trim() ?? "",
+        state: state.stdout?.trim() || "OPEN" };
+    }
+    const bound = /^([\w.-]+\/[\w.-]+)#([1-9][0-9]*)$/.exec(value);
     const closing = pr?.closingIssuesReferences?.[0], body = CLOSES.exec(pr?.body ?? "");
     const guess = BRANCH_NUMBER.exec(branch);
     const [where, number] = bound ? [bound[1], bound[2]]

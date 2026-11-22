@@ -1,6 +1,11 @@
 import { View, div, svg, image } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { spaces, panes, focused, exec, run, theme, openOverlay, closeOverlay, props, shared, setShared } from "herdr";
+import { spaces, panes, focused, exec, run, theme, openOverlay, closeOverlay, props, shared, setShared, checking } from "herdr";
+import { issueSettings, issueToken, connectIssueProvider } from "./source.js";
+import { jiraCurrentUser, jiraIssues, linearIssues } from "./api.js";
+import { ExternalIssueViewer } from "./external-viewer.js";
+import { filterJiraIssues, jiraFilterOptions } from "./providers.js";
+import { CredentialPrompt } from "./credential.js";
 import { spaceFor, startWorkspace } from "./start.js";
 import { Viewer, openUrl, labelChip } from "./viewer.js";
 import { icons, icon, avatarPath, loadAvatar } from "./icons.js";
@@ -61,9 +66,14 @@ const pick = (value) => setShared("issues.pick", { ...value, at: Date.now() });
 
 export default class Issues extends View {
   init(_props, cx) {
-    const { issue, overlay, copyMenu: copying, menu, repoMenu, filterMenu } = props() ?? {};
+    const { issue, credential, overlay, copyMenu: copying, menu, repoMenu, filterMenu } = props() ?? {};
     if (filterMenu) { this.filterMenu = { ...filterMenu, overlay }; return; }
-    if (issue) { this.viewer = new Viewer(issue, overlay, cx); return; }
+    if (credential) { this.viewer = new CredentialPrompt(credential, overlay); return; }
+    if (issue) {
+      if (issue.provider && issue.provider !== "github") this.viewer = new ExternalIssueViewer(issue, overlay, cx);
+      else this.viewer = new Viewer(issue, overlay, cx);
+      return;
+    }
     if (copying) { this.copying = { ...copying, overlay }; return; }
     if (menu) { this.menu = { ...menu, overlay }; return; }
     if (repoMenu) return this.initRepoMenu(repoMenu, overlay);
@@ -72,10 +82,20 @@ export default class Issues extends View {
     this.repos = sharedMap("folders", "repos"); this.logins = sharedMap("logins", "logins"); this.spaceRepos = sharedMap("spaces", "spaces");
     this.tab = shared("issues.tab") ?? "issues"; this.query = { ...DEFAULT }; this.page = 0;
     this.projects = new Projects(this);
-    this.results = {}; this.loading = null; this.error = null;
+    this.results = {}; this.loading = null; this.error = null; this.providerSettings = null; this.providerReady = false;
+    this.jiraAdvanced = false; this.jiraMe = null; this.jiraFilters = { assignee: "all", status: "open", priority: "", issueType: "" }; this.linearFilters = {};
     this.pickAt = shared("issues.pick")?.at; this.changedAt = shared("issues.changed")?.at;
     this.input = InputState.new({ placeholder: "Search", value: this.query[this.tab] });
     this.input.on("submit", (_e, cx) => this.apply(this.input.value(), cx));
+    if (checking()) return;
+    cx.spawn(async (cx) => {
+      this.providerSettings = await issueSettings();
+      this.providerReady = true;
+      if (this.providerSettings.provider !== "github" && this.query.issues === DEFAULT.issues) this.query.issues = "";
+      this.input.set_value(this.query[this.tab]);
+      this.load(cx, true);
+      cx.notify();
+    });
     cx.spawn(async (cx) => { await icons(); this.icons = true; cx.notify(); });
     this.resolve(cx);
     this.refreshRepos(cx);
@@ -141,11 +161,44 @@ export default class Issues extends View {
     });
   }
 
-  key() { return `${this.repo}|${this.tab}|${this.query[this.tab]}`; }
+  key() {
+    if (this.tab === "issues" && this.providerSettings && this.providerSettings.provider !== "github") {
+      const scope = this.providerSettings.provider === "jira" ? this.providerSettings.jira.projects : this.providerSettings.linear.teams;
+      const site = this.providerSettings.provider === "jira" ? this.providerSettings.jira.baseUrl : "";
+      return `external-v2|${this.providerSettings.provider}|${site}|${scope.join(",")}|${this.query.issues}|${JSON.stringify(this.providerSettings.linear.filters)}|${this.jiraAdvanced}`;
+    }
+    return `${this.repo}|${this.tab}|${this.query[this.tab]}`;
+  }
+
+  loadExternal(cx, force = false) {
+    const key = this.key(), held = this.results[key], settings = this.providerSettings;
+    if (!force && age(held) < FRESH) return;
+    if (this.loading?.key === key && Date.now() - this.loading.at < 45000) return;
+    const loading = (this.loading = { key, at: Date.now() });
+    this.error = null;
+    const store = (entry) => { this.results[key] = entry; writeCache(`list:${key}`, entry); };
+    cx.spawn(async (cx) => {
+      cx.notify();
+      try {
+        let entry = held ?? await readCache(`list:${key}`);
+        if (entry && !held) { this.results[key] = entry; cx.notify(); }
+        const token = await issueToken(settings);
+        if (settings.provider === "jira" && !this.jiraMe) this.jiraMe = await jiraCurrentUser(settings, token);
+        if (!force && age(entry) < FRESH) return;
+        const items = settings.provider === "jira"
+          ? await jiraIssues(settings, token, this.query.issues, this.jiraAdvanced)
+          : await linearIssues(settings, token, this.query.issues, settings.linear.filters);
+        store({ at: Date.now(), items });
+      } catch (e) { if (this.key() === key) this.error = String(e?.message ?? e); }
+      finally { if (this.loading === loading) this.loading = null; cx.notify(); }
+    });
+  }
 
   // The list for the query: the disk cache at once, then GitHub only when it may have changed.
   // force (Refresh, the person's own edits) always fetches.
   load(cx, force = false) {
+    if (!this.providerReady) return;
+    if (this.tab === "issues" && this.providerSettings.provider !== "github") return this.loadExternal(cx, force);
     if (!this.repo) return;
     if (this.tab === "projects") return this.projects.load(cx, force);
     const key = this.key(), held = this.results[key];
@@ -175,7 +228,8 @@ export default class Issues extends View {
   }
 
   apply(q, cx) {
-    this.query[this.tab] = q.trim() || DEFAULT[this.tab];
+    const external = this.tab === "issues" && this.providerSettings?.provider !== "github";
+    this.query[this.tab] = q.trim() || (external ? "" : DEFAULT[this.tab]);
     if (this.tab === "projects") setShared("issues.projectQuery", this.query.projects);
     this.input.set_value(this.query[this.tab]);
     this.page = 0; this.load(cx); cx.notify();
@@ -188,6 +242,8 @@ export default class Issues extends View {
   // A popup's answer (shared "issues.pick").
   handle(p, cx) {
     if (p.query !== undefined) return this.apply(p.query, cx);
+    if (p.advanced !== undefined) { this.jiraAdvanced = p.advanced; return this.load(cx, true); }
+    if (p.jiraFilters) { this.jiraFilters = { ...this.jiraFilters, ...p.jiraFilters }; this.page = 0; cx.notify(); return; }
     if (p.project || p.groupBy || p.toggleField || p.setField || p.fieldMenu || p.projectsRefresh || p.toggleFilter || p.clearFilter) return this.projects.handle(p, cx);
     if (p.follow) { setShared("issues.selected", null); this.page = 0; return this.resolve(cx); }
     if (p.repo) {
@@ -227,12 +283,21 @@ export default class Issues extends View {
   // repo/pr: a Projects item can be from another repo than the picked one.
   start(i, cx, { repo = this.repo, pr = this.tab === "prs" } = {}) {
     const folder = this.folder(repo);
-    if (!folder) { (this.tab === "projects" ? this.projects : this).error = `No checkout of ${repo} is known here. Open a terminal in one, then Start.`; return cx.notify(); }
+    if (!folder) {
+      (this.tab === "projects" ? this.projects : this).error = repo
+        ? `No checkout of ${repo} is known here. Open a terminal in one, then Start.`
+        : "Choose a GitHub checkout before starting work on this issue.";
+      return cx.notify();
+    }
     const args = { repo, machine: this.repoOn, folder, item: i, pr, overlay: this.overlay };
     cx.spawn(async () => startWorkspace(args));
   }
 
   openIssue(i, { repo = this.repo, pr = this.tab === "prs" } = {}) {
+    if (i.provider && i.provider !== "github") {
+      openOverlay({ mod: "issues", kind: "dialog", width: 0.86, height: 0.9, props: { issue: { ...i, repo, folder: this.folder(repo), machine: this.repoOn } } });
+      return;
+    }
     openOverlay({ mod: "issues", kind: "dialog", width: 0.86, height: 0.9, props: { issue: {
       repo, number: i.number, on: this.repoOn, data: null, me: this.me,
       pr, folder: this.folder(repo), machine: this.repoOn } } });
@@ -283,9 +348,10 @@ export default class Issues extends View {
   updated(iso) { return updated(iso); }
 
   status(i, t, pr = this.tab === "prs") {
-    const [label, color, glyph] = pr
+    let [label, color, glyph] = pr
       ? (i.state === "MERGED" ? ["Merged", GITHUB.done, "pull"] : i.state === "CLOSED" ? ["Closed", GITHUB.skipped, "pull"] : i.isDraft ? ["Draft", GITHUB.skipped, "pull"] : ["Open", GITHUB.open, "pull"])
       : (i.state === "OPEN" ? ["Open", GITHUB.open, "issue"] : i.stateReason === "NOT_PLANNED" ? ["Closed", GITHUB.skipped, "skipped"] : ["Closed", GITHUB.done, "done"]);
+    if (i.provider === "jira" && i.statusName) label = i.statusName;
     return { label, color, glyph };
   }
 
@@ -304,20 +370,25 @@ export default class Issues extends View {
     const changed = shared("issues.changed");
     if (changed?.at && changed.at !== this.changedAt) { this.changedAt = changed.at; cx.timer.after(0, (cx) => this.load(cx, true)); }
 
+    const external = this.tab === "issues" && (this.providerSettings?.provider ?? "github") !== "github";
     return v_flex().id("issues").size_full().min_h(0).rounded(12).overflow_hidden().bg(t.background).border_1().border_color(t.border)
       .text_color(t.foreground).text_size(13).px(20).pt(14).pb(16).gap(12)
       .child(this.topBar(t))
       .child(this.tabsRow(t))
-      .child(!this.repo ? this.empty(t) : this.tab === "projects" ? this.projects.card(t, cx) : this.card(t, cx));
+      .child(!external && !this.repo ? this.empty(t) : this.tab === "projects" ? this.projects.card(t, cx) : this.card(t, cx));
   }
 
   topBar(t) {
-    const where = ["GitHub", this.repoOn ?? "This Mac", this.repo].filter(Boolean).join(" · ");
+    const provider = this.providerSettings?.provider ?? "github";
+    const where = provider === "github" || this.tab !== "issues" ? ["GitHub", this.repoOn ?? "This Mac", this.repo].filter(Boolean).join(" · ")
+      : [provider === "jira" ? "Jira Cloud" : "Linear", ...(provider === "jira" ? this.providerSettings.jira.projects : this.providerSettings.linear.teams)].filter(Boolean).join(" · ");
     return h_flex().h(36).gap(10).items_center()
       .child(div().id("issues-close").size(32).flex().items_center().justify_center().rounded(8).cursor_pointer().text_color(t.muted)
         .hover((s) => s.bg(t.hover).text_color(t.foreground)).on_click(() => closeOverlay(this.overlay)).child(this.glyph("close", 18)))
-      .child(div().size(34).flex().items_center().justify_center().rounded(8).border_1().border_color(t.border).bg(t.raised).child(this.glyph("github", 17)))
-      .child(div().h(30).px(12).flex().items_center().rounded(8).border_1().border_color(t.border).text_size(13).text_color(t.muted).child(where));
+      .child(div().size(34).flex().items_center().justify_center().rounded(8).border_1().border_color(t.border).bg(t.raised).child(this.glyph(provider === "github" ? "github" : "issue", 17)))
+      .child(div().h(30).px(12).flex().items_center().rounded(8).border_1().border_color(t.border).text_size(13).text_color(t.muted).child(where))
+      .when(this.tab === "issues", (e) => e.child(this.btn("provider-settings", t, "Settings", () => run("mod.open", { name: "better-config" }))))
+      .when(provider !== "github" && this.tab === "issues", (e) => e.child(this.btn("provider-connect", t, "Connect", () => connectIssueProvider(this.providerSettings))));
   }
 
   tabsRow(t) {
@@ -333,7 +404,7 @@ export default class Issues extends View {
           openOverlay({ mod: "issues", kind: "popup", width: 420, height: 480, ...(at ? { at } : {}),
             props: { repoMenu: { current: this.repo, following: this.following, detected: this.detected ?? null, local: known } } });
         }))
-      .when(Boolean(this.repo), (e) => e
+      .when(Boolean(this.repo) && (this.tab !== "issues" || this.providerSettings?.provider === "github"), (e) => e
         .child(this.btn("repo-github", t, this.glyph("external", 16), () => openUrl(`https://github.com/${this.repo}/${{ prs: "pulls", projects: "projects" }[this.tab] ?? "issues"}`), { square: true })));
   }
 
@@ -345,18 +416,30 @@ export default class Issues extends View {
   }
 
   card(t, cx) {
-    const q = this.query[this.tab], base = DEFAULT[this.tab], mine = `${base} assignee:@me`;
-    const items = this.results[this.key()]?.items ?? [], pages = Math.max(1, Math.ceil(items.length / PAGE));
+    const q = this.query[this.tab], external = this.tab === "issues" && this.providerSettings?.provider !== "github";
+    const base = external ? "" : DEFAULT[this.tab], mine = `${base} assignee:@me`;
+    const allItems = this.results[this.key()]?.items ?? [];
+    const items = this.providerSettings?.provider === "jira" && this.tab === "issues"
+      ? filterJiraIssues(allItems, this.jiraFilters, this.jiraMe?.accountId) : allItems;
+    const pages = Math.max(1, Math.ceil(items.length / PAGE));
     if (this.page >= pages) this.page = pages - 1;
     const shown = items.slice(this.page * PAGE, (this.page + 1) * PAGE);
     return v_flex().flex_1().min_h(0).rounded(12).border_1().border_color(t.border).bg(t.chrome).overflow_hidden()
-      .child(h_flex().px(18).pt(14).gap(8)
+      .when(external && this.providerSettings.provider === "jira", (e) => e.child(h_flex().px(18).pt(14).gap(8)
+        .child(this.chip("jira-preset-open", "Open", this.jiraFilters.status === "open" && this.jiraFilters.assignee === "all", t, (cx) => this.jiraPreset("open", cx)))
+        .child(this.chip("jira-preset-mine", "Assigned to me", this.jiraFilters.status === "open" && this.jiraFilters.assignee === "me", t, (cx) => this.jiraPreset("mine", cx)))))
+      .when(!external, (e) => e.child(h_flex().px(18).pt(14).gap(8)
         .child(this.chip("seg-open", "Open", q === base, t, (cx) => this.apply(base, cx)))
-        .child(this.chip("seg-mine", "Assigned to me", q === mine, t, (cx) => this.apply(mine, cx))))
+        .child(this.chip("seg-mine", "Assigned to me", q === mine, t, (cx) => this.apply(mine, cx)))))
       .child(h_flex().px(18).py(12).gap(8).items_center()
-        .child(this.btn("filters", t, [this.glyph("filter", 16), div().child("Filters")], () => this.filters()))
+        .child(this.btn("filters", t, [this.glyph("filter", 16), div().child(external ? this.providerSettings.provider === "jira" ? "JQL" : "Advanced" : "Filters")], () => this.filters()))
+        .when(external && this.providerSettings.provider === "jira", (e) => e
+          .child(this.jiraFilterButton(t, "assignee", "Assignee"))
+          .child(this.jiraFilterButton(t, "status", "Status"))
+          .child(this.jiraFilterButton(t, "priority", "Priority"))
+          .child(this.jiraFilterButton(t, "issueType", "Type")))
         .child(this.searchBox(t, q, base))
-        .child(this.btn("new", t, this.glyph("plus", 16), () => openUrl(`https://github.com/${this.repo}/${this.tab === "prs" ? "compare" : "issues/new"}`), { square: true }))
+        .when(!external, (e) => e.child(this.btn("new", t, this.glyph("plus", 16), () => openUrl(`https://github.com/${this.repo}/${this.tab === "prs" ? "compare" : "issues/new"}`), { square: true })))
         .child(this.btn("refresh", t, this.loading ? svg("mods/workspace-chrome/spinner.svg").size(16).text_color(t.working).spin(900) : this.glyph("refresh", 16),
           (cx) => this.load(cx, true), { square: true })))
       .when(Boolean(this.error), (e) => e.child(div().px(18).pb(8).text_size(12).text_color(t.ansi1).child(this.error)))
@@ -387,24 +470,28 @@ export default class Issues extends View {
       .child(cell(96, label("ID"))).child(div().flex_1().child(label("TITLE / CONTEXT")))
       .child(cell(120, label("ASSIGNEES"))).child(cell(120, label("STATUS"))).child(cell(130, label("UPDATED"))).child(cell(130, div()));
 
-    const s = this.status(i, t), space = this.spaceFor(i), repoName = this.repo.split("/")[1];
+    const s = this.status(i, t), space = this.spaceFor(i), repoName = this.repo?.split("/")[1] ?? i.projectKey ?? i.teamKey ?? "";
+    const github = !i.provider || i.provider === "github";
     const assignees = i.assignees ?? [];
     const stop = (e, cx) => { this.press = e; cx.stop_propagation(); };
     const kind = this.kind(), n = String(i.number);
     return r.id(`row-${i.number}`).min_h(72).py(10).bg(t.background).cursor_pointer().hover((st) => st.bg(t.hover))
       .on_click(() => this.openIssue(i))
       .child(cell(96, h_flex().h(26).px(8).gap(6).items_center().rounded(6).border_1().border_color(t.border).text_size(12).text_color(t.muted)
-        .child(this.glyph(s.glyph, 13, t.muted)).child(`#${i.number}`)))
+        .child(this.glyph(s.glyph, 13, t.muted)).child(github ? `#${i.number}` : i.number)))
       .child(v_flex().flex_1().min_w(0).gap(4)
         .child(div().text_size(14).truncate().child(i.title))
         .child(h_flex().gap(10).items_center().text_size(12).text_color(t.muted).overflow_hidden()
           .child(div().flex_none().child(i.author?.login?.replace(/^app\//, "") ?? "ghost"))
           .child(div().flex_none().child(repoName))
-          .children((i.labels ?? []).slice(0, 4).map((l) => labelChip(l, t)))))
+          .when(Boolean(i.issueType), (e) => e.child(labelChip({ name: i.issueType }, t)))
+          .when(Boolean(i.priority), (e) => e.child(labelChip({ name: `Priority: ${i.priority}` }, t)))
+          .children((i.labels ?? []).slice(0, 3).map((l) => labelChip(l, t)))))
       .child(cell(120, assignees.length || this.me
         ? h_flex().id(`assign-${n}`).h(30).px(5).gap(4).items_center().rounded(15).hover((st) => st.bg(t.raised)).on_mouse_down("left", stop)
           .on_click((_e, cx) => {
             cx.stop_propagation();
+            if (!github) return;
             const mine = assignees.some((a) => a.login === this.me);
             this.popup({ title: "Assignees", items: [
               ...assignees.map((a) => ({ label: a.login, check: true })),
@@ -414,12 +501,13 @@ export default class Issues extends View {
           })
           .when(!assignees.length, (e) => e.child(div().px(4).text_color(t.dim).child("–")))
           .children(assignees.slice(0, 3).map((a) => this.avatar(a.login, 22, t, cx)))
-          .when(assignees.length > 0, (e) => e.child(this.glyph("chevron", 12, t.muted)))
+          .when(github && assignees.length > 0, (e) => e.child(this.glyph("chevron", 12, t.muted)))
         : div().text_color(t.dim).child("–")))
       .child(cell(120, h_flex().id(`status-${n}`).h(26).px(8).gap(5).items_center().rounded(13).border_1().border_color(s.color + "99").bg(s.color + "1a")
         .text_size(12).text_color(s.color).on_mouse_down("left", stop)
         .on_click((_e, cx) => {
           cx.stop_propagation();
+          if (!github) return;
           const open = i.state === "OPEN", reopen = { label: "Reopen", pick: { gh: [kind, "reopen", n, "-R", this.repo] } };
           this.popup({ title: "Status", items: kind === "pr"
             ? (open ? [{ label: "Close pull request", pick: { gh: ["pr", "close", n, "-R", this.repo] } }] : i.state === "CLOSED" ? [reopen] : [{ label: "Merged", check: true }])
@@ -428,7 +516,7 @@ export default class Issues extends View {
               { label: "Close as not planned", hint: "Won't fix, duplicate, stale", pick: { gh: ["issue", "close", n, "-R", this.repo, "--reason", "not planned"] } },
             ] : [reopen] });
         })
-        .child(this.glyph(s.glyph, 12, s.color)).child(s.label).child(this.glyph("chevron", 11, s.color))))
+        .child(this.glyph(s.glyph, 12, s.color)).child(s.label).when(github, (e) => e.child(this.glyph("chevron", 11, s.color)))))
       .child(cell(130, div().text_size(12).text_color(t.muted).child(updated(i.updatedAt))))
       .child(cell(130, h_flex().gap(6).items_center().justify_end()
         .child(this.btn(`start-${n}`, t, [div().font_medium().child(space ? "Open" : "Start"), this.glyph("arrow", 14)], (cx) => this.start(i, cx), { solid: Boolean(space), h: 30 }))
@@ -438,9 +526,9 @@ export default class Issues extends View {
             cx.stop_propagation();
             this.popup({ items: [
               { label: "Copy link", hint: i.url, copy: i.url },
-              { label: "Copy reference", hint: `${this.repo}#${n}`, copy: `${this.repo}#${n}` },
-              { label: "Copy number and title", hint: `#${n} ${i.title}`, copy: `#${n} ${i.title}` },
-              { label: "Open on GitHub", open: i.url },
+              { label: "Copy reference", hint: github ? `${this.repo}#${n}` : n, copy: github ? `${this.repo}#${n}` : n },
+              { label: "Copy number and title", hint: `${n} ${i.title}`, copy: `${n} ${i.title}` },
+              { label: "Open issue", open: i.url },
             ] }, 300);
           })
           .child(this.glyph("dots", 16)))));
@@ -459,8 +547,55 @@ export default class Issues extends View {
       .child(nav("next", [div().child("Next"), this.glyph("right", 14)], at + 1, at < pages - 1));
   }
 
+  jiraFilterButton(t, field, title) {
+    const filters = this.jiraFilters;
+    let value = filters[field] || "Any";
+    if (field === "assignee") {
+      value = filters.assignee === "me" ? "Me" : filters.assignee === "unassigned" ? "Unassigned"
+        : filters.assignee === "all" ? "Anyone" : jiraFilterOptions(this.results[this.key()]?.items ?? []).assignees.find((item) => item.value === filters.assignee)?.label ?? "Anyone";
+    } else if (field === "status") {
+      value = filters.status === "open" ? "Open" : filters.status === "all" ? "Any" : filters.status.slice(7);
+    }
+    return this.btn(`jira-filter-${field}`, t, [div().text_color(t.muted).child(title), div().font_medium().child(value), this.glyph("chevron", 11, t.muted)],
+      () => this.openJiraFilter(field, title));
+  }
+
+  jiraPreset(preset, cx) {
+    this.jiraFilters = { ...this.jiraFilters, assignee: preset === "mine" ? "me" : "all", status: "open" };
+    this.page = 0;
+    cx.notify();
+  }
+
+  openJiraFilter(field, title) {
+    const options = jiraFilterOptions(this.results[this.key()]?.items ?? []);
+    const pickValue = (value) => ({ jiraFilters: { [field]: value } });
+    const rows = field === "assignee" ? [
+      { label: "Me", value: "me" }, { label: "Anyone", value: "all" }, { label: "Unassigned", value: "unassigned" },
+      ...options.assignees.map((item) => ({ label: item.label, value: item.value })),
+    ] : field === "status" ? [
+      { label: "Any status", value: "all" }, { label: "Open issues", value: "open" },
+      ...options.statuses.map((status) => ({ label: status, value: `status:${status}` })),
+    ] : field === "priority" ? [
+      { label: "Any priority", value: "" }, ...options.priorities.map((priority) => ({ label: priority, value: priority })),
+    ] : [
+      { label: "Any type", value: "" }, ...options.issueTypes.map((type) => ({ label: type, value: type })),
+    ];
+    this.popup({ title, items: rows.map((row) => ({ label: row.label, check: this.jiraFilters[field] === row.value, pick: pickValue(row.value) })) }, 300);
+  }
+
   // Filters: GitHub search qualifiers written into the query.
   filters() {
+    if (this.tab === "issues" && this.providerSettings?.provider === "jira") {
+      this.popup({ title: "Jira search", items: [
+        { label: "Simple text", check: !this.jiraAdvanced, pick: { advanced: false } },
+        { label: "Advanced JQL", check: this.jiraAdvanced, pick: { advanced: true } },
+      ] }, 220);
+      return;
+    }
+    if (this.tab === "issues" && this.providerSettings?.provider === "linear") {
+      run("mod.open", { name: "better-config" });
+      return;
+    }
     const base = DEFAULT[this.tab], q = this.query[this.tab];
     const toggle = (token) => (q.includes(token) ? q.replace(token, "").replace(/\s+/g, " ").trim() : `${q} ${token}`);
     const state = (s) => `${q.replace(/\bis:(open|closed|merged)\b/g, "").replace(/\s+/g, " ").trim()} ${s}`.trim();

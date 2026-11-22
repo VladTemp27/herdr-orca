@@ -31,11 +31,11 @@ export class Card {
     });
   }
 
-  view(repo, number, pr) {
+  view(repo, number, pr, externalIssue) {
     const p = props();
     closeOverlay(p.overlay);
     openOverlay({ mod: "issues", kind: "dialog", width: 0.86, height: 0.9, props: { issue: {
-      repo, number, on: null, pr, folder: p.folder, machine: p.machine } } });
+      ...(externalIssue ?? {}), repo, number, on: null, pr, folder: p.folder, machine: p.machine } } });
   }
 
   copy(text) {
@@ -59,21 +59,21 @@ export class Card {
     return div().h(1).mx(3).my(4).flex_none().bg(t.border);
   }
 
-  // A PR or issue: the row opens it in the viewer; copy and GitHub sit on the right.
-  item(t, { id, icon, color, state, title, repo, number, url, pr }) {
+  // A PR or issue: the row opens it in the viewer; copy and its provider sit on the right.
+  item(t, { id, icon, color, state, title, repo, number, url, pr, provider, externalIssue }) {
     return h_flex().id(id).px(8).py(6).gap(9).items_start().rounded(RADIUS.row).cursor_pointer()
       .hover((s) => s.bg(t.hover)).on_mouse_down("left", stop)
-      .on_click((_e, cx) => { cx.stop_propagation(); this.view(repo, number, pr); })
+      .on_click((_e, cx) => { cx.stop_propagation(); this.view(repo, number, pr, externalIssue); })
       .child(div().pt(1).child(Icon(icon, 14).text_color(color)))
       .child(v_flex().flex_1().min_w(0).gap(2)
         .child(div().truncate().text_size(TEXT.menu).text_color(t.foreground).child(title))
         .child(h_flex().gap(5).items_center().text_size(TEXT.caption).text_color(t.dim)
-          .child(div().flex_none().child(`#${number}`))
+          .child(div().flex_none().child(provider ? number : `#${number}`))
           .child(div().flex_none().text_color(color).child(state))
           .child(div().min_w(0).truncate().child(repo))))
       .child(h_flex().flex_none().gap(1)
         .child(this.button(`${id}-copy`, "copy", "Copy link", t, () => this.copy(url)))
-        .child(this.button(`${id}-open`, "external", "Open on GitHub", t, (cx) => cx.open_url(url))));
+        .child(this.button(`${id}-open`, "external", provider ? `Open in ${provider === "jira" ? "Jira" : "Linear"}` : "Open on GitHub", t, (cx) => cx.open_url(url))));
   }
 
   // The note's lines; a click edits it.
@@ -120,7 +120,8 @@ export class Card {
       const open = issue.state === "OPEN";
       sections.push([this.label(t, "Issue"), this.item(t, { id: `card-issue-${issue.number}`, icon: open ? "issue" : "issue-closed",
         color: open ? t.ansi2 : t.ansi5, state: open ? "Open" : "Closed", title: issue.title,
-        repo: issue.repository, number: issue.number, pr: false, url: issue.url })]);
+        repo: issue.repository, number: issue.number, pr: false, url: issue.url,
+        provider: issue.provider, externalIssue: issue.provider ? issue : null })]);
     }
     if (ports.length) sections.push([this.label(t, `Live ports · ${ports.length}`), ...ports.map((port) => this.port(t, port, mono))]);
     return v_flex().id("space-card").w_full().p(5).gap(1).bg(t.popover).text_color(t.foreground)
@@ -129,8 +130,11 @@ export class Card {
       // How fresh this is: refreshing, couldn't refresh, or when GitHub last answered.
       .when(prs.length > 0 || Boolean(issue), (el) => el.child(h_flex().px(8).pt(4).pb(2).gap(6).items_center()
         .text_size(TEXT.caption).text_color(failed ? t.ansi3 : t.dim)
-        .when(refreshing, (row) => row.child(Icon("spinner", 11).spin(900)).child("Refreshing from GitHub…"))
-        .when(!refreshing && failed, (row) => row.child(`Couldn't reach GitHub${updated ? ` · from ${ago(updated)}` : ""}`))
-        .when(!refreshing && !failed && Boolean(updated), (row) => row.child(`Updated ${ago(updated)}`))));
+        .when(issue?.provider && !prs.length, (row) => row.child(`Issue link saved from ${issue.provider === "jira" ? "Jira" : "Linear"}`))
+        .when(!issue?.provider || prs.length > 0, (row) => row
+          .when(refreshing, (el) => el.child(Icon("spinner", 11).spin(900)).child("Refreshing GitHub data…"))
+          .when(!refreshing && failed, (el) => el.child(`Couldn't reach GitHub${updated ? ` · from ${ago(updated)}` : ""}`))
+          .when(!refreshing && !failed && Boolean(updated), (el) => el.child(`Updated ${ago(updated)}`)))));
+
   }
 }
