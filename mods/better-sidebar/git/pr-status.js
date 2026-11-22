@@ -54,8 +54,8 @@ export function githubRepository(url) {
 }
 
 /**
- * One observer per sidebar. Git runs on the checkout's machine; gh runs locally,
- * using the person's existing authentication. No helper executable is required.
+ * One observer per sidebar. Git and gh run on the checkout's machine, using its
+ * existing authentication. No helper executable is required.
  * Maps include the machine in their keys so remote paths cannot collide.
  */
 export class PRStatusObserver {
@@ -64,7 +64,7 @@ export class PRStatusObserver {
     this.checked = new Map(); // Checkout key -> last attempt time and branch.
     this.entries = new Map(); // Checkout key -> last published PRs or error.
     this.cache = new Map(); // gh argument list -> short-lived response cache.
-    this.probes = new Map(); // repository -> { at, etag, changed }: one conditional request a minute.
+    this.probes = new Map(); // Machine/repository -> { at, etag, changed }.
     this.loaded = false;
   }
 
@@ -85,20 +85,22 @@ export class PRStatusObserver {
     try { await fs.mkdir(`${appHome()}/data/better-sidebar`, { recursive: true }); await fs.writeFile(saved(), JSON.stringify(d)); } catch {}
   }
 
-  // Did anything in these repositories change on GitHub? One conditional request per repo
-  // a minute, shared by every space on it; a 304 (unchanged) costs no rate limit.
-  async repoChanged(repositories) {
+  // Did anything in these repositories change on GitHub? One conditional request per
+  // machine and repo each minute; a 304 (unchanged) costs no rate limit.
+  async repoChanged(repositories, machine) {
     let changed = false;
     for (const repo of repositories) {
-      const seen = this.probes.get(repo);
+      const key = JSON.stringify([machine ?? null, repo]);
+      const seen = this.probes.get(key);
       if (seen && Date.now() - seen.at < PR_POLL_MS - 5000) { changed ||= seen.changed; continue; }
       const args = ["api", "-i", `repos/${repo}/issues?state=all&sort=updated&direction=desc&per_page=1`];
       if (seen?.etag) args.splice(2, 0, "-H", `If-None-Match: ${seen.etag}`);
-      const r = await exec("gh", args).catch(() => null);
-      const out = r?.stdout ?? "";
+      const r = await exec("gh", args, { on: machine });
+      if (r.code !== 0) throw new Error((r.stderr || "GitHub unavailable; check gh auth login").trim());
+      const out = r.stdout ?? "";
       const same = Boolean(seen?.etag) && /^HTTP\/[\d.]+ 304/m.test(out);
       const etag = same ? seen.etag : (/^etag:\s*(.+?)\s*$/im.exec(out)?.[1] ?? null);
-      this.probes.set(repo, { at: Date.now(), etag, changed: !same });
+      this.probes.set(key, { at: Date.now(), etag, changed: !same });
       changed ||= !same;
     }
     return changed;
@@ -200,11 +202,11 @@ export class PRStatusObserver {
     const branch = head.stdout.trim();
     const repositories = await this.repositories(git);
     // Same branch, nothing changed on GitHub, and not yet due: keep what's shown.
-    const fresh = force || (await this.repoChanged(repositories));
+    const fresh = force || (await this.repoChanged(repositories, place.machine));
     if (previous?.branch === branch && !previous.error && !fresh && Date.now() - (previous.updated ?? 0) < standFor(previous.prs))
       return { prs: previous.prs, issue: previous.issue, branch, kept: true };
-    const prs = await this.findPRs(git, branch, repositories, fresh);
-    return { prs, issue: await this.findIssue(git, branch, repositories, prs, fresh), branch };
+    const prs = await this.findPRs(git, branch, repositories, place.machine, fresh);
+    return { prs, issue: await this.findIssue(git, branch, repositories, prs, place.machine, fresh), branch };
   }
 
   async repositories(git) {
@@ -222,7 +224,7 @@ export class PRStatusObserver {
 
   // The issue this checkout works on: the link Start wrote, the PR's closing references
   // or "Closes #N", else a number in the branch name that GitHub confirms is an issue.
-  async findIssue(git, branch, repositories, prs, fresh = false) {
+  async findIssue(git, branch, repositories, prs, machine, fresh = false) {
     const pr = prs[0], repo = pr?.repository ?? [...repositories][0];
     const link = await git(["config", "--get", `branch.${branch}.herdr-issue`]);
     const bound = /^([\w.-]+\/[\w.-]+)#([1-9][0-9]*)$/.exec(link.stdout?.trim() ?? "");
@@ -234,7 +236,7 @@ export class PRStatusObserver {
       : guess ? [repo, guess[1]] : [];
     if (!where || !number) return null;
     try {
-      const issue = await this.query(["issue", "view", String(number), "--repo", where, "--json", "number,title,state,url"], fresh ? 0 : ISSUE_TTL);
+      const issue = await this.query(["issue", "view", String(number), "--repo", where, "--json", "number,title,state,url"], machine, fresh ? 0 : ISSUE_TTL);
       // gh answers for PR numbers too: only a real issue counts.
       return issue.url?.includes("/issues/") ? { ...issue, repository: where } : null;
     } catch {
@@ -242,7 +244,7 @@ export class PRStatusObserver {
     }
   }
 
-  async findPRs(git, branch, repositories, fresh = false) {
+  async findPRs(git, branch, repositories, machine, fresh = false) {
     // Explicit worktree bindings survive local branch renames and take
     // precedence over guessing a PR from matching head branch names.
     const association = await git(["config", "--get", `branch.${branch}.herdr-pr`]);
@@ -258,7 +260,7 @@ export class PRStatusObserver {
         binding[1],
         "--json",
         PR_FIELDS,
-      ], fresh ? 0 : PR_POLL_MS);
+      ], machine, fresh ? 0 : PR_POLL_MS);
       return [{ ...pr, repository: binding[1] }];
     }
 
@@ -278,7 +280,7 @@ export class PRStatusObserver {
         "100",
         "--json",
         PR_FIELDS,
-      ], fresh ? 0 : PR_POLL_MS);
+      ], machine, fresh ? 0 : PR_POLL_MS);
       for (const pr of found) {
         // Branch names are not unique across forks. Only show PRs whose head
         // repository is one of this checkout's remotes, not somebody else's fork.
@@ -299,11 +301,11 @@ export class PRStatusObserver {
   }
 
   // maxAge 0: the repo changed (or the row is hovered), ask again.
-  async query(args, maxAge = PR_POLL_MS) {
-    const key = JSON.stringify(args);
+  async query(args, machine, maxAge = PR_POLL_MS) {
+    const key = JSON.stringify([machine ?? null, args]);
     const cached = this.cache.get(key);
     if (cached && Date.now() - cached.at < maxAge) return cached.data;
-    const result = await exec("gh", args);
+    const result = await exec("gh", args, { on: machine });
     if (result.code !== 0)
       throw new Error((result.stderr || "GitHub unavailable; check gh auth login").trim());
     const data = JSON.parse(result.stdout);

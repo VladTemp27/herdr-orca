@@ -45,7 +45,7 @@ export function loadDiff(v, cx) {
   if (v.diffs[id] !== undefined) return;
   v.diffs[id] = null;
   cx.spawn(async (cx) => {
-    const r = await exec("gh", ["pr", "diff", String(v.number), "-R", v.repo], { on: v.on }).catch((e) => ({ code: 1, stderr: String(e) }));
+    const r = await exec("gh", ["pr", "diff", String(v.number), "-R", v.repo], { on: v.machine }).catch((e) => ({ code: 1, stderr: String(e) }));
     const files = {};
     if (r.code === 0) for (const part of r.stdout.split(/^(?=diff --git )/m)) {
       const m = /^diff --git a\/.+? b\/(.+)$/m.exec(part);

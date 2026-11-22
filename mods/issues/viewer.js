@@ -155,7 +155,7 @@ export class Viewer {
     const repo = this.repo, number = this.number, id = this.id(), current = () => this.id() === id;
     this.issue = this.cache[id] ?? null; this.error = null; this.loading = true;
     const gh = async (args) => {
-      const r = await exec("gh", args, { on: this.on });
+      const r = await exec("gh", args, { on: this.machine });
       if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim());
       return JSON.parse(r.stdout);
     };
@@ -230,7 +230,7 @@ export class Viewer {
     this.busy = label; this.error = null; this.closeMenu = false;
     cx.spawn(async (cx) => {
       try {
-        const r = await exec("gh", [kind, args[0], String(number), "-R", repo, ...args.slice(1)], { on: this.on });
+        const r = await exec("gh", [kind, args[0], String(number), "-R", repo, ...args.slice(1)], { on: this.machine });
         if (r.code !== 0) throw new Error((r.stderr || r.stdout).trim());
         after?.();
       } catch (e) { this.error = String(e?.message ?? e); }
@@ -291,7 +291,7 @@ export class Viewer {
     if (this.picking && !this.people[repo]) cx.spawn(async (cx) => {
       const kept = await readCache(`assignees:${repo}`);
       if (kept && age(kept) < LIST_TTL) { this.people[repo] = kept.list; return cx.notify(); }
-      const r = await exec("gh", ["api", "--paginate", `repos/${repo}/assignees?per_page=100`, "--jq", ".[] | [.login, .avatar_url] | @tsv"], { on: this.on }).catch(() => null);
+      const r = await exec("gh", ["api", "--paginate", `repos/${repo}/assignees?per_page=100`, "--jq", ".[] | [.login, .avatar_url] | @tsv"], { on: this.machine }).catch(() => null);
       this.people[repo] = r?.code === 0 ? r.stdout.trim().split("\n").filter(Boolean).map((line) => { const [login, avatar] = line.split("\t"); return { login, avatar }; })
         .sort((a, b) => a.login.localeCompare(b.login, undefined, { sensitivity: "base" })) : (kept?.list ?? []);
       if (r?.code === 0) writeCache(`assignees:${repo}`, { at: Date.now(), list: this.people[repo] });
@@ -323,7 +323,7 @@ export class Viewer {
     if (this.editing && !this.labels[repo]) cx.spawn(async (cx) => {
       const kept = await readCache(`labels:${repo}`);
       if (kept && age(kept) < LIST_TTL) { this.labels[repo] = kept.list; return cx.notify(); }
-      const r = await exec("gh", ["label", "list", "-R", repo, "--limit", "200", "--json", "name,color,description"], { on: this.on }).catch(() => null);
+      const r = await exec("gh", ["label", "list", "-R", repo, "--limit", "200", "--json", "name,color,description"], { on: this.machine }).catch(() => null);
       this.labels[repo] = r?.code === 0 ? JSON.parse(r.stdout).sort((a, b) => a.name.localeCompare(b.name)) : (kept?.list ?? []);
       if (r?.code === 0) writeCache(`labels:${repo}`, { at: Date.now(), list: this.labels[repo] });
       cx.notify();
