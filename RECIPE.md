@@ -150,7 +150,12 @@ Project settings, Excalidraw (cmd-shift-e), Open in VS Code (cmd-g) and context 
   machine), **When to run** (Ask every time / Run by default / Skip by default) and **Wait for setup
   to complete before starting agent**; and Remove project.
 - **Files**: clicking a file opens it in its own tab (Markdown rendered with a Source toggle), reusing
-  the tab already showing it; right-click opens it in your apps. Git-ignored files and folders (and
+  the tab already showing it; right-click opens it in your apps. Right-click → **New file…** types the
+  name in the tree, as Orca does (in the clicked folder, beside the clicked file, or at the top on empty
+  space; `src/new.ts` makes the folders); Enter creates it and opens it to edit, Esc cancels. File tabs
+  are editable right away: **Auto save** (Mod settings, on by default) saves a moment after typing
+  stops, ⌘S saves any time, and the tab shows `name •` while unsaved. A file changed on disk under
+  unsaved edits offers Reload or Overwrite; files over 400 KB stay read-only. Git-ignored files and folders (and
   everything under an ignored folder) are greyed out; symlinks show a link icon after their name.
   Code is colored by the **Code colors** setting (Mod settings): Editor (default; a soft palette for
   light and dark), Terminal (the theme's ANSI colors) or Off. `.env`, `.env.*`, `*.env` and `.envrc`
@@ -188,7 +193,8 @@ Project settings, Excalidraw (cmd-shift-e), Open in VS Code (cmd-g) and context 
   the menu and the meter ask), `hibernate.answer` (the resume dialog's reply), `pane-heads`, `issues.pick`,
   `issues.changed`, `projects.settings` (per `JSON.stringify([machine, main checkout])`: name, icon,
   `base`, `location`, `issue_branch`, `issue_prompt`, `pr_prompt`, `agent`, `setup`, `setupWhen`, `setupWait`),
-  `projects.location`, `files-open-with.tabs`,
+  `projects.location`, `files-open-with.tabs`, `files-open-with.new-file` (`{panel, folder, at}`, the
+  menu's New file for the panel that opened it),
   `better-changes.*`. Git config: `branch.<b>.herdr-issue` / `herdr-pr` = `owner/repo#N`.
 - Programs: `git`, `gh` (logged in), `curl` (avatars), `osascript`/`pbcopy`/`open` on macOS,
   `claude` / `codex` CLIs for usage limits and resuming, `lsof` for ports and Codex sessions,

@@ -1,9 +1,7 @@
 // Code colors for the panel preview and viewer tabs, from mod.json `settings.syntax`:
 // "editor" (a soft editor palette), "terminal" (the theme's ANSI colors) or "off".
 import { theme, settings } from "herdr";
-import { loadSettings } from "./settings.js";
-
-const DEFAULTS = { syntax: "editor" };
+import { prefs } from "./prefs.js";
 
 const DARK = { keyword: "#c586c0", string: "#ce9178", comment: "#8b949e", punctuation: "#8b949e", function: "#dcdcaa", type: "#4ec9b0",
   number: "#b5cea8", constant: "#4fc1ff", boolean: "#569cd6", "string.escape": "#d7ba7d" };
@@ -22,15 +20,7 @@ export function languageFor(path) {
   return LANG[ext] ?? ext;
 }
 
-// Read once per load; Herdr reloads the mod when mod.json is saved.
-let mode = null;
-function syntaxMode() {
-  mode ??= loadSettings("files-open-with", DEFAULTS).then(({ settings: s, problems }) => {
-    for (const p of problems) console.warn(`files-open-with mod.json settings: ${p}`);
-    return s.syntax;
-  });
-  return mode;
-}
+const syntaxMode = () => prefs().then(s => s.syntax);
 
 export async function syntaxColors() {
   const t = theme(), m = await syntaxMode();
