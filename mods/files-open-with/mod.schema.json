@@ -41,6 +41,12 @@
             "terminal": "Terminal",
             "off": "Off"
           }
+        },
+        "auto_save": {
+          "title": "Auto save",
+          "description": "Save files you edit in a file tab a moment after you stop typing. Off: save with ⌘S or Save.",
+          "type": "boolean",
+          "default": true
         }
       }
     }

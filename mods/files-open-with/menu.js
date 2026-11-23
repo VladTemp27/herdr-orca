@@ -1,11 +1,11 @@
 // The right-click popup. Opened by panel.js with
-// props { role: "menu", path (absolute), dir, on, items (indexes into ITEMS), overlay }.
+// props { role: "menu", path (absolute), dir, on, panel, items (indexes into ITEMS), overlay }.
 // ↑/↓ move, Enter runs, Esc closes.
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { props, closeOverlay, theme, exec, notify } from "herdr";
-import { ITEMS, argvOf } from "./items.js";
+import { props, closeOverlay, setShared, theme, exec, notify } from "herdr";
+import { ITEMS, argvOf, NEW_FILE } from "./items.js";
 
 // A plain class: main.js (the View) owns it and forwards init and render.
 export default class Menu {
@@ -23,6 +23,11 @@ export default class Menu {
     const p = props(), it = this.list()[i];
     if (!it) return;
     closeOverlay(p.overlay);
+    // The panel that opened the menu types the name inline: in the clicked folder, or beside the clicked file.
+    if (it.action === "new-file") {
+      const folder = p.dir ? p.path : p.path.slice(0, p.path.lastIndexOf("/")) || "/";
+      return setShared(NEW_FILE, { panel: p.panel, folder, at: Date.now() });
+    }
     const [cmd, ...args] = argvOf(it, p.path);
     // Not awaited by the menu: Quick Look runs until its window is closed.
     exec(cmd, args).then(

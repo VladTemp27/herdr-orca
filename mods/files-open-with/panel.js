@@ -1,11 +1,12 @@
 // Herdr's shipped Files panel (Herdr 0.1.11, Apache-2.0), plus a right-click menu
 // that opens the clicked file or folder in your own apps. See menu.js and items.js.
 import { div, svg, image } from "gpui-kit";
-import { v_flex, h_flex, Editor, EditorState } from "gpui-base";
-import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, window, openOverlay } from "herdr";
+import { v_flex, h_flex, Editor, EditorState, InputState, Input } from "gpui-base";
+import { spaces, panes, focused, exec, readTextFile, watchFolder, theme, settings, window, openOverlay, shared } from "herdr";
 import { openFile } from "./tabs.js";
 import { syntaxColors, languageFor } from "./syntax.js";
-import { available, menuHeight } from "./items.js";
+import { available, menuHeight, NEW_FILE } from "./items.js";
+import { createFile, nameProblem } from "./fs.js";
 import ICONS from "./icons.js";
 
 function location() {
@@ -54,6 +55,9 @@ async function directory(path, on) {
 // A plain class: main.js (the View) owns it and forwards init and render.
 export default class Panel {
   init(_props, cx) {
+    this.id = Math.random().toString(36).slice(2);
+    this.seenNew = shared(NEW_FILE)?.at;
+    this.nameInput(cx);
     this.saved = new Map();
     this.entries = new Map(); this.folders = new Set(); this.pending = new Set(); this.marks = {}; this.ignored = new Set();
     this.refresh(cx);
@@ -173,13 +177,76 @@ export default class Panel {
 
   // Right-click: which items apply (installed apps only), then the popup at the pointer.
   menu(path, dir, cx) {
-    if (window()?.platform !== "macos") return;
-    const target = { path, dir, on: this.on };
+    const target = { path, dir, on: this.on, panel: this.id };
     cx.spawn(async () => {
-      const items = await available(target);
+      const items = await available(target, window()?.platform === "macos");
       if (!items.length) return;
       openOverlay({ mod: "files-open-with", kind: "popup", width: 240, height: menuHeight(items.length), props: { role: "menu", ...target, items } });
     });
+  }
+
+  // One name field for the panel's life: state can't be made during render.
+  nameInput() {
+    const input = this.input = InputState.new({ placeholder: "File name" });
+    input.on("change", (_e, cx) => { if (this.creating?.error) { this.creating.error = null; cx.notify(); } });
+    input.on("submit", (_e, cx) => this.commitNew(cx));
+    // A blur right after opening comes from the closing menu, not the person.
+    input.on("blur", (_e, cx) => {
+      const c = this.creating;
+      if (!c || c.busy || Date.now() - c.started < 400) return;
+      if (!input.value().trim() || c.error) { this.cancelNew(); cx.notify(); } else this.commitNew(cx);
+    });
+  }
+
+  // New file: a name row at the top of `folder` (relative; "" is the root), as in Orca.
+  // Enter creates it and opens it to edit; Esc, or leaving it empty, cancels.
+  startNew(folder, cx) {
+    if (this.file) this.show(null);
+    if (folder && !this.folders.has(folder)) this.toggle(folder, cx);
+    this.input.set_value("");
+    const c = this.creating = { folder, error: null, busy: false, started: Date.now() };
+    this.input.focus();
+    cx.timer.after(120, () => { if (this.creating === c) this.input.focus(); });
+    cx.notify();
+  }
+
+  cancelNew() {
+    this.creating = null;
+  }
+
+  commitNew(cx) {
+    const c = this.creating;
+    if (!c || c.busy) return;
+    const name = this.input.value().trim();
+    c.error = nameProblem(name);
+    if (c.error) return cx.notify();
+    const rel = c.folder ? `${c.folder}/${name}` : name, file = `${this.root}/${rel}`, on = this.on, space = location().space;
+    c.busy = true; cx.notify();
+    cx.spawn(async cx => {
+      try {
+        await createFile(file, on);
+        if (this.creating === c) this.cancelNew();
+        // Open the folders a nested name made, so the new file shows.
+        const parts = rel.split("/");
+        for (let i = 1; i < parts.length; i++) { const f = parts.slice(0, i).join("/"); if (!this.folders.has(f)) this.folders.add(f); }
+        this.refresh(cx);
+        openFile({ file, on, space, edit: true }, cx);
+      } catch (e) { if (this.creating === c) { c.busy = false; c.error = e.message ?? String(e); } }
+      finally { cx.notify(); }
+    });
+  }
+
+  newRow(depth, t, dark) {
+    const c = this.creating, name = this.input.value().trim() || "file";
+    return v_flex().flex_none()
+      .child(h_flex().id("files-new").h(28).flex_none().pl(8 + depth * 18).pr(8).gap(7).items_center()
+        .on_key_down((e, cx) => { if (e.key === "escape") { cx.stop_propagation(); this.cancelNew(); cx.notify(); } })
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .child(div().w(12).flex_none())
+        .child(image(icon(name, false, false, dark)).size(16).flex_none())
+        .child(Input.new(this.input).flex_1().min_w(0).h(24).px(6).rounded(5).border_1().border_color(c.error ? t.ansi1 : t.accent)
+          .bg(t.background).text_size(13).text_color(t.foreground)))
+      .when(Boolean(c.error), el => el.child(div().pl(8 + depth * 18 + 39).pr(8).pb(4).text_size(11.5).text_color(t.ansi1).child(c.error)));
   }
 
   // Ignored by git, itself or through a folder above it.
@@ -190,6 +257,7 @@ export default class Panel {
 
   rows(prefix, depth, out, t, dark) {
     if (out.length >= TOTAL || depth > 40) return out;
+    if (this.creating?.folder === prefix) out.push(this.newRow(depth, t, dark));
     for (const entry of this.entries.get(prefix) ?? []) {
       if (out.length >= TOTAL) break;
       const path = prefix ? `${prefix}/${entry.name}` : entry.name, open = this.folders.has(path), mark = this.marks[`${this.root}/${path}`];
@@ -208,7 +276,18 @@ export default class Panel {
   }
 
   render(cx) {
-    if (key() !== this.context?.key) this.refresh(cx);
+    if (key() !== this.context?.key) { this.cancelNew(); this.refresh(cx); }
+    // The menu's New file, if it was opened from this panel.
+    const req = shared(NEW_FILE);
+    if (req && req.at !== this.seenNew) {
+      this.seenNew = req.at;
+      const root = this.root?.replace(/\/$/, "");
+      // Started after this render: focus and toggling don't belong inside one.
+      if (req.panel === this.id && root && (req.folder === root || req.folder.startsWith(root + "/"))) {
+        const folder = req.folder.slice(root.length + 1);
+        cx.timer.after(0, cx => this.startNew(folder, cx));
+      }
+    }
     const t = theme(), dark = Boolean(settings().dark);
     return v_flex().id("files").size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(t.border).text_color(t.foreground).text_size(13)
       .child(h_flex().h(42).flex_none().px(14).gap(8).items_center().border_b(1).border_color(t.border)
@@ -217,7 +296,9 @@ export default class Panel {
         .child(div().id("files-current").flex_1().min_w(0).truncate().text_right().text_size(12).text_color(t.dim)
           .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); if (this.root) this.menu(this.file ? `${this.root}/${this.file}` : this.root, !this.file, cx); })
           .child(this.file ?? this.root?.split(/[\\/]/).pop() ?? "")))
-      .when(!this.file, el => el.child(v_flex().id("files-tree").flex_1().min_h(0).overflow_y_scrollbar().p(6).children(this.rows("", 0, [], t, dark))
+      .when(!this.file, el => el.child(v_flex().id("files-tree").flex_1().min_h(0).overflow_y_scrollbar().p(6)
+        .on_mouse_down("right", (_e, cx) => { if (this.root) this.menu(this.root, true, cx); })
+        .children(this.rows("", 0, [], t, dark))
         .when(Boolean(this.error) || !this.entries.get("")?.length, el => el.child(div().p(8).text_size(12).text_color(t.dim).child(this.error || (this.loading ? "Loading files…" : this.root ? "No files" : "No folder"))))
         .when(this.limited, el => el.child(div().p(8).text_size(11).text_color(t.dim).child("File list limited to 500 entries per folder and 5,000 total")))))
       .when(Boolean(this.file), el => el.child(this.code ? Editor.new(this.code).flex_1().min_h(0) : div().p(12).text_color(t.dim).child(this.fileError || "Loading file…")));
